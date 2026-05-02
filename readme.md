@@ -1,19 +1,39 @@
 # qwen3-tts-cpp-streaming
 
 C++ streaming voice clone implementation for Qwen3 TTS
+
 Credit to predict-woo/qwen3-tts.cpp and Danmoreng/qwen3-tts.cpp for their earlier work on C++ qwen3-tts
 
-Goals:
+## Overview
+
+### Goals:
 - ≤250ms first audio
 - Sub-realtime ongoing stream
 
-Status:
+### Status:
 - Local Qwen3-TTS C++ voice-clone streaming
 - Using: Qwen3-TTS-12Hz-1.7B-Base
-- First PCM observed: ~175–280ms on RTX 5090
+- First PCM observed: ~175ms on RTX 5090
 - Streaming throughput: ~1.2–1.3x realtime
 - Output: mono 24kHz PCM16
 
+### Current Experiments
+
+- **Tail-context decoding (no prefix re-decode)**. Eliminated O(N²) behavior by decoding only new frames with minimal left context.
+- **Immediate first-frame scheduling** Queued the first decode directly from the first-frame callback (~40 ms), removing idle gaps.
+- **One-frame first window** Allowed earliest possible audio emission, cutting TTFA significantly.
+- **Fixed-size steady windows** Stable 12–16 frame decode batches for predictable performance and throughput.
+- **Async decode pipeline** Decoupled generation from vocoder decode to keep GPU fully utilized.
+- **Playback worker isolation** Moved audio output to a separate thread to eliminate blocking from synthesis timing.
+- **Streaming prewarm** Warmed model + decoder path ahead of real input to avoid first-run latency spikes.
+- **Final tail flush with extended context** Prevented cutoff artifacts without affecting streaming latency.
+- **Minimal buffering / immediate playback** Started playback on first PCM chunk instead of waiting for larger buffers.
+- **Tuned sampling defaults (top-k, etc.)** Balanced quality vs. stability without increasing latency.
+- **Removed Python / IPC overhead** Native C++ execution avoided serialization and process latency.
+- **Strictly bounded decode shapes** Kept predictable frame sizes (1 / 13 / 16) enabling consistent performance.
+- **Separated latency measurement stages** Identified real bottlenecks (generation vs decode vs playback) to guide fixes.
+
+## Quick Start Guide
 Python environment for scripts & training:
 py -3.10 -m venv .venv
 .venv\Scripts\activate
