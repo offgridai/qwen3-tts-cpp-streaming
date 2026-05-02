@@ -1,8 +1,6 @@
 /build/
 /out/
 /models/
-/reference/*.wav
-/reference/*.json
 /examples/*.wav
 *.gguf
 *.bin
