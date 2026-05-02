@@ -1,0 +1,55 @@
+name: Windows Build and Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows-pwsh:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build (Ninja, all targets)
+        shell: pwsh
+        run: |
+          ./build.ps1 -UseNinja -Configuration Release -BuildAll
+
+      - name: Run regression harness (non-strict)
+        shell: pwsh
+        run: |
+          ./scripts/run_all_tests.ps1 -Configuration Release
+
+      - name: Detect strict component prerequisites
+        id: strict_check
+        shell: pwsh
+        run: |
+          $required = @(
+            "models/qwen3-tts-0.6b-f16.gguf",
+            "models/qwen3-tts-tokenizer-f16.gguf",
+            "reference/det_text_tokens.bin",
+            "reference/det_speaker_embedding.bin",
+            "reference/det_prefill_embedding.bin",
+            "reference/det_first_frame_logits.bin",
+            "reference/det_speech_codes.bin",
+            "reference/det_decoded_audio.bin"
+          )
+          $missing = @($required | Where-Object { -not (Test-Path $_) })
+          if ($missing.Count -eq 0) {
+            "strict_ready=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } else {
+            "strict_ready=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            Write-Host "Strict mode skipped. Missing prerequisites:"
+            $missing | ForEach-Object { Write-Host "  - $_" }
+          }
+
+      - name: Run regression harness (strict component mode)
+        if: steps.strict_check.outputs.strict_ready == 'true'
+        shell: pwsh
+        run: |
+          ./scripts/run_all_tests.ps1 -Configuration Release -RequireComponentTests

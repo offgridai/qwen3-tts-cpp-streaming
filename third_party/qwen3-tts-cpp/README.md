@@ -1,0 +1,473 @@
+# qwen3-tts.cpp
+
+![PyTorch vs qwen3-tts.cpp benchmark](./docs/benchmark_pytorch_vs_cpp.png)
+
+**Benchmark Snapshot (PyTorch vs qwen3-tts.cpp):** Basic 3.19x faster, Clone 4.07x faster. Peak RSS delta: Basic +19.0%, Clone +7.7%.
+
+C++ inference for [Qwen3-TTS](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-Base) using the [GGML](https://github.com/ggml-org/ggml) tensor library.
+
+Runs the full TTS pipeline in pure C++17, including text tokenization, speaker encoding, transformer code generation, and vocoder decoding, without Python or PyTorch at inference time.
+
+## Features
+
+- Full text-to-speech pipeline in C++17 with GGML backend
+- Voice cloning from reference audio or reusable speaker embeddings
+- Named speakers and natural-language voice/style instructions for CustomVoice models
+- Greedy and sampled decoding (temperature, top-k, repetition penalty)
+- Multilingual language selection from the CLI and native APIs
+- Native C API plus optional JNI and Kotlin Multiplatform bindings
+- GGUF model format with native quantizer support for Q4/Q5/Q8 and K-quants
+- Runtime backend selection with GPU/Metal preference and CPU fallback
+- Deterministic reference tests comparing C++ output against Python
+- Benchmark and debug tooling for Python-vs-C++, CUDA graphs, and trace dumps
+- Compile-time timing instrumentation with zero overhead in normal builds
+
+## Documentation
+
+- Development plan and implementation status: `docs/development_plan.md`
+- Tensor conversion mapping reference: `docs/tensor_mapping.md`
+
+## Prerequisites
+
+- C++17 compiler (GCC 9+ or Clang 10+)
+- CMake 3.14+
+- Vendored `./ggml` submodule or another local [GGML](https://github.com/ggml-org/ggml) checkout
+- Python 3.10+ with [uv](https://github.com/astral-sh/uv) (model conversion only)
+
+## Quickstart (macOS, copy/paste)
+
+Run these commands from a fresh clone:
+
+```bash
+git clone https://github.com/predict-woo/qwen3-tts.cpp.git
+cd qwen3-tts.cpp
+git submodule update --init --recursive
+
+# 1) Build qwen3-tts.cpp (vendored ggml is built as part of this step)
+cmake -S . -B build -DGGML_METAL=ON
+cmake --build build -j4
+
+# 2) Create a uv Python environment for setup/conversion tools
+uv venv .venv
+source .venv/bin/activate
+
+# 3) Install Python dependencies
+uv pip install --upgrade pip
+uv pip install huggingface_hub gguf torch safetensors numpy tqdm coremltools
+
+# Optional if model access requires auth:
+# huggingface-cli login
+
+# 4) Download and generate all runtime model artifacts
+python scripts/setup_pipeline_models.py
+
+# 5) Basic synthesis example
+./build/qwen3-tts-cli \
+  -m models \
+  -t "Hello from qwen3-tts.cpp running on macOS with CoreML by default." \
+  -o examples/readme_example_basic.wav
+
+# 6) Voice-clone example using sample audio in this repo
+./build/qwen3-tts-cli \
+  -m models \
+  -r examples/readme_clone_input.wav \
+  -t "This is a voice cloning example generated from the sample audio file in this directory." \
+  -o examples/readme_example_clone.wav
+```
+
+Expected model artifacts after step 4:
+
+- `models/qwen3-tts-0.6b-f16.gguf`
+- `models/qwen3-tts-tokenizer-f16.gguf`
+- `models/coreml/code_predictor.mlpackage` (on macOS)
+
+Expected audio outputs after steps 5-6:
+
+- `examples/readme_example_basic.wav`
+- `examples/readme_example_clone.wav`
+
+Included voice-clone input/output pair (so users can compare directly):
+
+- Input reference audio: `examples/readme_clone_input.wav`
+- Generated output audio: `examples/readme_example_clone.wav`
+
+Audio preview (inline):
+
+<audio controls src="./examples/readme_clone_input.wav"></audio>
+<br/>
+<audio controls src="./examples/readme_example_clone.wav"></audio>
+
+If your Markdown renderer does not show inline controls, use direct links:
+
+- [Play input reference WAV](./examples/readme_clone_input.wav)
+- [Play generated output WAV](./examples/readme_example_clone.wav)
+
+## Build
+
+```bash
+git clone https://github.com/predict-woo/qwen3-tts.cpp.git
+cd qwen3-tts.cpp
+git submodule update --init --recursive
+
+# Build qwen3-tts.cpp (builds vendored ggml by default)
+cmake -S . -B build
+cmake --build build -j4
+```
+
+> **Note:** Top-level CMake builds the vendored `./ggml` submodule by default (`QWEN3_TTS_EMBED_GGML=ON`).
+> Use `-DQWEN3_TTS_GGML_DIR=<path-to-ggml>` to point at another local GGML checkout.
+> If you want to link prebuilt GGML libraries instead, set `-DQWEN3_TTS_EMBED_GGML=OFF -DQWEN3_TTS_GGML_BUILD_DIR=<path-to-ggml-build>`.
+
+### Build on Windows (Visual Studio 2022)
+
+```powershell
+# From repo root
+.\build.ps1 -Configuration Release
+
+# Optional: Ninja build (and optional CUDA)
+.\build.ps1 -UseNinja -Configuration Release
+.\build.ps1 -UseNinja -EnableCuda -Configuration Release
+
+# Build all targets (CLI + tests)
+.\build.ps1 -BuildAll -Configuration Release
+```
+
+`build.ps1` always uses the same `.\build` directory by default (including Ninja mode).  
+If you switch generators (Visual Studio <-> Ninja), the script automatically cleans and reconfigures that same build directory.
+
+If your `.\ggml` directory is empty (submodule not initialized), point `QWEN3_TTS_GGML_DIR` to another local GGML checkout.
+
+Run:
+
+```powershell
+.\build\Release\qwen3-tts-cli.exe -m models -t "Hello from Windows" -o out.wav
+```
+
+## Model Setup (Recommended)
+
+Use the one-shot setup script:
+
+```bash
+source .venv/bin/activate
+python scripts/setup_pipeline_models.py
+```
+
+### Model Setup (1.7B-Base and CustomVoice)
+
+For the 1.7B models, use the dedicated setup script:
+
+```bash
+source .venv/bin/activate
+python scripts/setup_1.7b_model.py
+```
+
+This script will:
+1. Download the 1.7B-Base and 1.7B-CustomVoice models.
+2. Download the 12Hz Tokenizer.
+3. Convert them to GGUF with distinct names:
+   - `models/qwen3-tts-1.7b-base-f16.gguf`
+   - `models/qwen3-tts-1.7b-customvoice-f16.gguf`
+
+Useful flags for `setup_pipeline_models.py`:
+
+- `--force` re-downloads and re-generates all artifacts.
+- `--coreml auto|on|off` controls CoreML export behavior.
+- `--skip-download` skips HF download and uses existing local model dirs.
+
+## Manual Model Conversion (Advanced)
+
+Convert HuggingFace models to GGUF format:
+
+```bash
+# Download the model
+huggingface-cli download Qwen/Qwen3-TTS-12Hz-0.6B-Base \
+    --local-dir models/Qwen3-TTS-12Hz-0.6B-Base
+
+# Convert TTS model (transformer + speaker encoder + tokenizer)
+python scripts/convert_tts_to_gguf.py \
+    models/Qwen3-TTS-12Hz-0.6B-Base \
+    models/qwen3-tts-0.6b-f16.gguf
+
+# Optional: Quantize the model using the native C++ tool for maximum efficiency
+./build/qwen3-tts-quantize models/qwen3-tts-0.6b-f16.gguf models/qwen3-tts-0.6b-q4_k.gguf q4_k
+
+# Convert vocoder (audio decoder)
+python scripts/convert_tokenizer_to_gguf.py \
+    models/Qwen3-TTS-12Hz-0.6B-Base \
+    models/qwen3-tts-tokenizer-f16.gguf
+```
+
+Place both `.gguf` files in a `models/` directory.
+
+For `Qwen3-TTS-12Hz-1.7B-CustomVoice`, always re-run `scripts/convert_tts_to_gguf.py` after pulling converter updates. The converter now exports code predictor projection tensors (`code_pred.small_to_mtp.*`) required for correct 1.7B speech generation.
+
+## Usage
+
+```bash
+# Basic synthesis
+./build/qwen3-tts-cli -m models -t "Hello, world!" -o hello.wav
+
+# Voice cloning from reference audio
+./build/qwen3-tts-cli -m models -t "Hello! How are you?" -r reference.wav -o cloned.wav
+
+# Save a speaker embedding and reuse it later
+./build/qwen3-tts-cli -m models -r reference.wav \
+    --dump-speaker-embedding speaker.json -t "First pass" -o cloned_once.wav
+./build/qwen3-tts-cli -m models --speaker-embedding speaker.json \
+    -t "Second pass without re-encoding" -o cloned_reuse.wav
+
+# 1.7B Base model (standard generation)
+./build/qwen3-tts-cli -m models --model-name qwen3-tts-1.7b-base-f16.gguf \
+    -t "The 1.7B base model is now running successfully." -o base_1.7b.wav
+
+# 1.7B CustomVoice with style instruction
+./build/qwen3-tts-cli -m models --model-name qwen3-tts-1.7b-customvoice-f16.gguf \
+    --speaker vivian -t "Hello! How are you?" --instruct "Whispering, very soft and quiet voice." \
+    -o styled.wav
+
+# Greedy decoding with max length
+./build/qwen3-tts-cli -m models -t "Hello!" -r ref.wav -o out.wav \
+    --temperature 0 --max-tokens 2048
+```
+
+### CLI Options
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-m, --model <dir>` | Model directory containing GGUF files | (required) |
+| `--model-name <file>` | Select a specific TTS GGUF inside `--model` | auto-detect |
+| `-t, --text <text>` | Text to synthesize | (required) |
+| `-o, --output <file>` | Output WAV file path | `output.wav` |
+| `-r, --reference <file>` | Reference audio for voice cloning | (none) |
+| `--speaker <name>` | Named speaker from loaded CustomVoice metadata | (none) |
+| `--speaker-embedding <file>` | Reuse a saved speaker embedding (`.json` or `.bin`) | (none) |
+| `--dump-speaker-embedding <file>` | Save the embedding extracted from `--reference` | (none) |
+| `--temperature <val>` | Sampling temperature (0 = greedy) | 0.9 |
+| `--top-k <n>` | Top-k sampling (0 = disabled) | 50 |
+| `--top-p <val>` | Top-p sampling | 1.0 |
+| `--max-tokens <n>` | Maximum audio frames to generate | 4096 |
+| `--repetition-penalty <val>` | Repetition penalty on codebook-0 token generation | 1.05 |
+| `-l, --language <lang>` | Language code: `en ru zh ja ko de fr es it pt` | `en` |
+| `--instruction <text>`, `--instruct <text>` | Voice/style steering text (CustomVoice 1.7B) | (none) |
+| `-j, --threads <n>` | Number of compute threads | 4 |
+
+`--top-p` is currently parsed by the CLI but not yet wired into transformer sampling.
+`--instruct` now follows Python reference behavior (`instruct_ids` path): the instruction is injected as a separate user prompt, not mixed into assistant text.
+`--reference`, `--speaker`, and `--speaker-embedding` are mutually exclusive input modes.
+
+On macOS, CoreML code predictor is enabled by default when `models/coreml/code_predictor.mlpackage` exists.
+Set `QWEN3_TTS_USE_COREML=0` to disable it. Low-memory mode is opt-in via `QWEN3_TTS_LOW_MEM=1`.
+
+## Native APIs
+
+The project now exposes more than the CLI:
+
+- C++ API via `src/qwen3_tts.h` (`Qwen3TTS`)
+- C API via `src/qwen3_tts_c.h` for model loading, synthesis, speaker embedding extraction, available speakers, and model capability queries
+- Optional JNI shared library via `-DQWEN3_TTS_BUILD_SHARED=ON`
+- Kotlin Multiplatform wrappers in `shared/src/*/kotlin/com/qwen/tts/studio/engine/QwenEngine.kt`
+
+The native capability APIs are intended for frontends that need to inspect the loaded model and adapt their UI:
+
+- Whether the model supports voice cloning
+- Whether it exposes named speakers
+- Whether it supports instruction/style prompts
+- Speaker embedding dimension and available speaker count
+
+To build the JNI shared library for JVM/Android integration:
+
+```bash
+cmake -S . -B build -DQWEN3_TTS_BUILD_SHARED=ON
+cmake --build build -j4
+```
+
+### Backend Selection
+
+At runtime, each component logs its selected backend (for example, `TTSTransformer backend: MTL0` or `BLAS`).
+
+- Preferred order: `IGPU` -> `GPU` -> `ACCEL` -> `CPU`
+- Encoder and transformer can run on Metal/other accelerators with CPU fallback in the scheduler
+- Decoder now follows the same backend preference and will use Metal when available
+
+### Debug Trace Dumps (1.7B Investigation)
+
+You can dump frame-level logits/tokens from the C++ generator and inspect them offline.
+
+```powershell
+$env:QWEN3_TTS_DEBUG_DUMP_DIR = ".\trace_cpp_1p7"
+$env:QWEN3_TTS_DEBUG_DUMP_MAX_FRAMES = "2"
+$env:QWEN3_TTS_DEBUG_DUMP_MAX_CODE_STEPS = "15"
+.\build\qwen3-tts-cli.exe -m models --model-name qwen3-tts-1.7b-f16.gguf --speaker "<name>" -t "Hello." --temperature 0 --top-k 1 --max-tokens 64 -o out_1p7b.wav
+```
+
+Then inspect/compare traces:
+
+```powershell
+python .\scripts\debug_trace_report.py --trace-a .\trace_cpp_1p7
+python .\scripts\debug_trace_report.py --trace-a .\trace_cpp_1p7 --trace-b .\trace_cpp_0p6
+```
+
+For Python-vs-C++ (recommended for 1.7B debugging), first dump Python traces:
+
+```powershell
+python .\scripts\dump_python_trace.py --model .\models\Qwen3-TTS-12Hz-1.7B-CustomVoice --speaker "<name>" --text "Hello." --trace-dir .\trace_py_1p7 --max-new-tokens 64 --max-frames 2 --device cuda --dtype bfloat16
+python .\scripts\debug_trace_report.py --trace-a .\trace_cpp_1p7 --trace-b .\trace_py_1p7
+```
+
+## Benchmarking
+
+The benchmark snapshot at the top of this README is reproducible with the repo scripts:
+
+- `scripts/benchmark_python_vs_cpp.ps1` compares the current CLI against the Python reference pipeline and can also compare against an original forked CLI build
+- `scripts/benchmark_cuda_graphs.ps1` measures 1.7B F16/Q8_0/Q4_K runs with CUDA graphs enabled and disabled
+
+Typical Windows usage:
+
+```powershell
+.\scripts\benchmark_python_vs_cpp.ps1 -Deterministic
+.\scripts\benchmark_cuda_graphs.ps1
+```
+
+Results are written under `benchmark_output/`.
+
+## Architecture
+
+```
+Text ──► [Tokenizer] ──► token IDs
+                              │
+Reference Audio ──► [Speaker Encoder] ──► speaker embedding
+                              │
+token IDs + speaker embedding ──► [TTS Transformer] ──► speech codes (N frames x 16 codebooks)
+                              │
+speech codes ──► [Vocoder] ──► audio waveform (24kHz)
+```
+
+### Source Files
+
+| File | Component | Description |
+|------|-----------|-------------|
+| `text_tokenizer.{h,cpp}` | Tokenizer | BPE text tokenizer from GGUF |
+| `audio_tokenizer_encoder.{h,cpp}` | Speaker Encoder | ECAPA-TDNN x-vector extractor |
+| `tts_transformer.{h,cpp}` | TTS Transformer | 28-layer Qwen2 talker + 5-layer code predictor |
+| `audio_tokenizer_decoder.{h,cpp}` | Vocoder | WavTokenizer decoder (codes to waveform) |
+| `qwen3_tts.{h,cpp}` | Pipeline | Full pipeline orchestration |
+| `qwen3_tts_c.{h,cpp}` | C API | Stable native API for C, Kotlin/Native, and other FFI consumers |
+| `qwen3_tts_jni.cpp` | JNI | JVM/Android bridge used by Kotlin |
+| `main.cpp` | CLI | Command-line interface |
+| `gguf_loader.{h,cpp}` | GGUF | Model loading utilities |
+
+### TTS Transformer Details
+
+The transformer generates speech codes in two stages per frame:
+
+1. **Talker** (28 layers, 16 heads, 1024 hidden) produces a hidden state and codebook-0 logits.
+2. **Code Predictor** (5 layers) autoregressively generates codebooks 1-15 from that hidden state.
+
+The prefill embedding mirrors the Python pipeline exactly:
+- Positions 0-2: text-projected role tokens (`<|im_start|>`, `assistant`, `\n`)
+- Positions 3-6: TTS pad + codec embeddings (think tokens, language ID)
+- Position 7: TTS pad + speaker embedding
+- Position 8: TTS BOS + codec pad embedding
+- Position 9+: text-projected text tokens + codec BOS/embeddings
+
+## Testing
+
+```bash
+# Run full test suite
+bash scripts/run_all_tests.sh
+
+# Individual component tests
+./build/test_tokenizer --model models/qwen3-tts-0.6b-f16.gguf
+./build/test_encoder --tokenizer models/qwen3-tts-0.6b-f16.gguf \
+    --audio clone.wav --reference reference/ref_audio_embedding.bin
+./build/test_transformer --model models/qwen3-tts-0.6b-f16.gguf \
+    --ref-dir reference/
+./build/test_decoder --tokenizer models/qwen3-tts-tokenizer-f16.gguf \
+    --codes reference/speech_codes.bin --reference reference/decoded_audio.bin
+
+# End-to-end Python vs C++ comparison
+uv run python scripts/compare_e2e.py
+
+# Generate deterministic reference data from Python
+uv run python scripts/generate_deterministic_reference.py
+```
+
+```powershell
+# Windows: use PowerShell test runner
+.\scripts\run_all_tests.ps1
+# Default CLI regression outputs (6 WAV files):
+#   regression_basic.wav
+#   regression_clone.wav
+#   regression_1p7b_basic.wav
+#   regression_1p7b_clone.wav
+#   regression_1p7b_style_whisper.wav
+#   regression_1p7b_style_angry_shout.wav
+# (1.7B style cases use the dedicated --instruct flag, not inline instruction text.)
+# (If 1.7B checks should be skipped on a local machine: -Skip17B)
+# The runner disables QWEN3_TTS_DEBUG_DUMP_* env vars during execution.
+
+# Optional: prepare/verify deterministic reference assets first
+.\scripts\prepare_test_assets.ps1 -GenerateMissing
+# (uses local .venv by default; add -InstallPythonDeps for first-time setup;
+# installs pinned deps from scripts/requirements-test-assets.txt)
+.\scripts\prepare_test_assets.ps1 -GenerateMissing -InstallPythonDeps
+# Force full regeneration even when files already exist
+.\scripts\prepare_test_assets.ps1 -ForceRegenerate
+# Determinism gate: fail if tracked metadata changed unexpectedly
+git diff --exit-code -- reference/det_metadata.json reference/metadata.json
+# (equivalent pathspec form: git diff --exit-code -- reference/*.json)
+
+# Optional: build first, then test
+.\build.ps1 -Configuration Release
+.\scripts\run_all_tests.ps1 -Configuration Release -RequireComponentTests
+
+# Optional: include 1.7B CLI regression check
+# (enabled by default; this line just shows explicit model/speaker overrides)
+.\scripts\run_all_tests.ps1 -Configuration Release -ModelName17 qwen3-tts-1.7b-f16.gguf -Model17Speaker vivian
+```
+
+### Test Results (F16 model)
+
+- Prefill logits: cosine similarity = 0.99999994 with Python reference
+- Codebook 0 match rate: 81% (frame-level exact match)
+- Codebooks 1-4: ~84% match rate
+- Audio output is perceptually equivalent; low waveform correlation is expected due to autoregressive divergence from F16 precision
+
+## Profiling
+
+Build with compile-time timing instrumentation (zero overhead when disabled):
+
+```bash
+cmake .. -DQWEN3_TTS_TIMING=ON
+make -j4
+```
+
+Example output (92 frames, 7.3s audio):
+
+```
+=== Detailed Generation Timing (92 frames) ===
+
+  Prefill:
+      Compute:           175.9 ms
+
+  Talker forward_step:
+      Graph build:        21.8 ms   (0.2 ms/frame)
+      Graph alloc:        34.1 ms   (0.4 ms/frame)
+      Compute:          7717.4 ms   (83.9 ms/frame)
+
+  Code predictor:
+      Init/KV/embed:       7.7 ms   (0.1 ms/frame)
+      Prefill (2tok):   1393.2 ms   (15.1 ms/frame)
+      Steps (14):      19531.7 ms   (212.3 ms/frame)
+      Compute:         20702.6 ms   (225.0 ms/frame)
+
+  Total generate:      28915.0 ms   (3.2 frames/s)
+```
+
+The code predictor (15 sequential forward passes per frame) accounts for ~71% of generation time.
+
+## Acknowledgments
+
+- [Qwen3-TTS](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-Base) by Alibaba Qwen team
+- [GGML](https://github.com/ggml-org/ggml) tensor library by Georgi Gerganov
+- [WavTokenizer](https://github.com/jishengpeng/WavTokenizer) vocoder architecture

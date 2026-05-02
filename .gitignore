@@ -1,0 +1,13 @@
+/build/
+/out/
+/models/
+/reference/*.wav
+/reference/*.json
+/examples/*.wav
+*.gguf
+*.bin
+*.log
+.vs/
+*.user
+*.suo
+.venv/

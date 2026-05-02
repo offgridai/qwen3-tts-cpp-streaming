@@ -1,0 +1,3 @@
+headers = qwen3_tts_c.h
+package = com.example.qwen3tts.cinterop
+linkerOpts = -lqwen3_tts
