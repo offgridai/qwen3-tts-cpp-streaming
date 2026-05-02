@@ -23,11 +23,23 @@ python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda)"
 pip install huggingface_hub gguf safetensors tqdm
 
 Acquire model and gguf:
-** python scripts\setup_1.7b_model.py
-** gguf
+python scripts\setup_1.7b_model.py
 
-Training command:
+Build underlying qwen3-tts-cpp:
+(in third_party\qwen3-tts-cpp)
+powershell -ExecutionPolicy Bypass -File .\build.ps1 -UseNinja -EnableCuda -EnableCudaGraphs -Configuration Release
 
+Build qwen3-tts-cpp-streaming:
+(top of repo)
+cmake -S . -B build
+cmake --build build --config Release
+
+Clone training command:
+build\qwen3-tts-cli.exe ^
+  -m models ^
+  -r reference\ref.wav ^
+  --dump-speaker-embedding reference\alfie_speaker.json ^
+  -t "This is a test string."
 
 Stream command:
 build\qwen3-tts-cli.exe ^
