@@ -101,6 +101,18 @@ fs::path ResolveFileNearEngineOrCwd(const fs::path& input, const fs::path& engin
     return cwd_candidate;
 }
 
+std::string NormalizeModelName(std::string model_identifier) {
+    if (model_identifier.empty()) {
+        return {};
+    }
+    const fs::path p(model_identifier);
+    model_identifier = p.filename().string();
+    if (model_identifier.size() < 5 || model_identifier.substr(model_identifier.size() - 5) != ".gguf") {
+        model_identifier += ".gguf";
+    }
+    return model_identifier;
+}
+
 } // namespace
 
 struct Qwen3StreamingTts::Impl {
@@ -164,8 +176,14 @@ bool Qwen3StreamingTts::synthesize_streaming(
     cmd << "cd /d " << Quote(engine_root.string()) << " && "
         << Quote(engine.string())
         << " -m " << Quote(model_dir.string())
-        << " --speaker-embedding " << Quote(speaker_embedding.string())
-        << " -t " << Quote(text)
+        << " --speaker-embedding " << Quote(speaker_embedding.string());
+
+    const std::string model_name = NormalizeModelName(options.model_identifier);
+    if (!model_name.empty()) {
+        cmd << " --model-name " << Quote(model_name);
+    }
+
+    cmd << " -t " << Quote(text)
         << " --temperature 0.9"
         << " --top-k 75"
         << " --top-p 1.0"
@@ -173,8 +191,13 @@ bool Qwen3StreamingTts::synthesize_streaming(
         << " --async-streaming-decode"
         << " --play-streaming"
         << " --prewarm-streaming"
-        << " --prewarm-frames 1"
-        << " --first-tail-window-frames " << options.first_tail_window_frames
+        << " --prewarm-frames 1";
+
+    if (options.live_preroll_ms > 0) {
+        cmd << " --live-preroll-ms " << options.live_preroll_ms;
+    }
+
+    cmd << " --first-tail-window-frames " << options.first_tail_window_frames
         << " --steady-tail-window-frames " << options.steady_tail_window_frames
         << " --context-frames " << options.context_frames
         << " --final-context-frames " << options.final_context_frames
@@ -182,6 +205,9 @@ bool Qwen3StreamingTts::synthesize_streaming(
 
     if (options.dump_first_frame_profile) {
         cmd << " --dump-first-frame-profile";
+    }
+    if (options.dump_streaming_overlap) {
+        cmd << " --dump-streaming-overlap";
     }
 
     std::cout << "Engine root: " << engine_root.string() << "\n";

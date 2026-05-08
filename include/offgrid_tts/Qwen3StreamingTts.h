@@ -6,22 +6,21 @@
 #include <vector>
 
 struct TtsStreamChunk {
-    int sample_rate = 24000;
-    int channels = 1;
-    std::vector<int16_t> pcm;
+    std::vector<float> samples;
+    int32_t sample_rate = 24000;
     bool is_final = false;
 };
 
 struct TtsStreamOptions {
-    int first_tail_window_frames = 1;
-    int steady_tail_window_frames = 12;
-    int context_frames = 4;
-    int final_context_frames = 4;
-    bool prewarm = true;
-    bool async_decode = true;
-    bool play_streaming = true;
-    bool dump_first_frame_profile = false;
     std::string output_wav = "examples/bridge_test.wav";
+    std::string model_identifier;
+    bool dump_first_frame_profile = false;
+    bool dump_streaming_overlap = false;
+    int32_t live_preroll_ms = 0;
+    int32_t first_tail_window_frames = 1;
+    int32_t steady_tail_window_frames = 12;
+    int32_t context_frames = 4;
+    int32_t final_context_frames = 4;
 };
 
 using TtsChunkCallback = std::function<void(const TtsStreamChunk&)>;
@@ -31,16 +30,9 @@ public:
     Qwen3StreamingTts();
     ~Qwen3StreamingTts();
 
-    Qwen3StreamingTts(const Qwen3StreamingTts&) = delete;
-    Qwen3StreamingTts& operator=(const Qwen3StreamingTts&) = delete;
-
     bool load(const std::string& model_dir);
     bool load_speaker_embedding(const std::string& path);
-
-    bool synthesize_streaming(
-        const std::string& text,
-        const TtsStreamOptions& options,
-        TtsChunkCallback on_chunk);
+    bool synthesize_streaming(const std::string& text, const TtsStreamOptions& options, TtsChunkCallback on_chunk);
 
 private:
     struct Impl;

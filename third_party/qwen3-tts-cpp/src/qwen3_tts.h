@@ -89,6 +89,15 @@ struct tts_params {
 
     // Diagnostic: print a compact first-frame latency breakdown for streaming generation.
     bool dump_first_frame_profile = false;
+
+    // Windows live playback only: buffer this many milliseconds before the first
+    // waveOutWrite. This is a playback safety cushion only; it does not alter
+    // WAV assembly or synthesis timing. A value of 0 preserves immediate playback.
+    int32_t live_preroll_ms = 0;
+
+    // Diagnostic: print per-window streaming queue/decode timing so we can verify
+    // whether generation is actually overlapping vocoder decode.
+    bool dump_streaming_overlap = false;
 };
 
 // TTS generation result

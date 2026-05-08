@@ -77,10 +77,12 @@ void print_usage(const char * program) {
     fprintf(stderr, "  --no-async-streaming-decode Disable async streaming decode\n");
     fprintf(stderr, "  --play-streaming       Play streaming chunks live while also writing WAV (default on)\n");
     fprintf(stderr, "  --no-play-streaming    Disable live playback while keeping streaming WAV output\n");
+    fprintf(stderr, "  --live-preroll-ms <ms> Buffer live PCM before first playback submit (default: 0)\n");
     fprintf(stderr, "  --prewarm-streaming    Warm transformer/decoder before timed streaming synthesis (default on)\n");
     fprintf(stderr, "  --no-prewarm-streaming Disable streaming warmup\n");
     fprintf(stderr, "  --prewarm-frames <n>   Number of frames for transformer prewarm (default: 1)\n");
     fprintf(stderr, "  --dump-first-frame-profile Print first-frame latency breakdown\n");
+    fprintf(stderr, "  --dump-streaming-overlap Print per-window queue/decode overlap diagnostics\n");
     fprintf(stderr, "  -h, --help             Show this help\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "Example:\n");
@@ -269,12 +271,20 @@ int main(int argc, char ** argv) {
             params.play_streaming = true;
         } else if (arg == "--no-play-streaming") {
             params.play_streaming = false;
+        } else if (arg == "--live-preroll-ms") {
+            if (++i >= (int) args.size()) {
+                fprintf(stderr, "Error: missing live-preroll-ms value\n");
+                return 1;
+            }
+            params.live_preroll_ms = std::max(0, std::stoi(args[i]));
         } else if (arg == "--prewarm-streaming") {
             params.prewarm_streaming = true;
         } else if (arg == "--no-prewarm-streaming") {
             params.prewarm_streaming = false;
         } else if (arg == "--dump-first-frame-profile") {
             params.dump_first_frame_profile = true;
+        } else if (arg == "--dump-streaming-overlap") {
+            params.dump_streaming_overlap = true;
         } else if (arg == "--prewarm-frames") {
             if (i + 1 >= args.size()) {
                 fprintf(stderr, "Error: missing prewarm frame count\n");
