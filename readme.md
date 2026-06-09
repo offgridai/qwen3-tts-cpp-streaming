@@ -1,78 +1,127 @@
 # qwen3-tts-cpp-streaming
 
-C++ streaming voice clone implementation for Qwen3 TTS
+Native streaming TTS workspace with two explicit layers:
 
-Credit to predict-woo/qwen3-tts.cpp and Danmoreng/qwen3-tts.cpp for their earlier work on C++ qwen3-tts
+- `engine/`: the core C++ TTS engine
+- `apps/streaming_cli/`: the thin streaming test harness
 
-## Overview
+The repository no longer treats the engine as a vendored third-party dependency. It is part of the workspace and builds directly with the app layer.
 
-### Goals:
-- ≤250ms first audio
-- Sub-realtime ongoing stream
+## Repository Layout
 
-### Status:
-- Local Qwen3-TTS C++ voice-clone streaming
-- Using: Qwen3-TTS-12Hz-1.7B-Base
-- First PCM observed: ~175ms on RTX 5090
-- Streaming throughput: ~1.2–1.3x realtime
-- Output: mono 24kHz PCM16
+```text
+apps/
+  streaming_cli/     Thin wrapper CLI for streaming experiments
+engine/              Core TTS engine, CLI, tests, and model tooling
+docs/                Workspace-level architecture and benchmark notes
+examples/            Generated WAV examples
+models/              Shared GGUF model artifacts
+reference/           Shared speaker embeddings and reference audio
+```
 
-### Current Experiments
+## Build
 
-- **Tail-context decoding (no prefix re-decode)**. Eliminated O(N²) behavior by decoding only new frames with minimal left context.
-- **Immediate first-frame scheduling** Queued the first decode directly from the first-frame callback (~40 ms), removing idle gaps.
-- **One-frame first window** Allowed earliest possible audio emission, cutting TTFA significantly.
-- **Fixed-size steady windows** Stable 12–16 frame decode batches for predictable performance and throughput.
-- **Async decode pipeline** Decoupled generation from vocoder decode to keep GPU fully utilized.
-- **Playback worker isolation** Moved audio output to a separate thread to eliminate blocking from synthesis timing.
-- **Streaming prewarm** Warmed model + decoder path ahead of real input to avoid first-run latency spikes.
-- **Final tail flush with extended context** Prevented cutoff artifacts without affecting streaming latency.
-- **Minimal buffering / immediate playback** Started playback on first PCM chunk instead of waiting for larger buffers.
-- **Tuned sampling defaults (top-k, etc.)** Balanced quality vs. stability without increasing latency.
-- **Removed Python / IPC overhead** Native C++ execution avoided serialization and process latency.
-- **Strictly bounded decode shapes** Kept predictable frame sizes (1 / 13 / 16) enabling consistent performance.
-- **Separated latency measurement stages** Identified real bottlenecks (generation vs decode vs playback) to guide fixes.
+### 1. Build the core engine CLI
 
-## Quick Start Guide
-Python environment for scripts & training:
-py -3.10 -m venv .venv
-.venv\Scripts\activate
-python -m pip install --upgrade pip
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda)"
-pip install huggingface_hub gguf safetensors tqdm
+From the repository root:
 
-Acquire Qwen3-tts model:
-python scripts\setup_1.7b_model.py
-
-Build underlying qwen3-tts-cpp:
-cd third_party\qwen3-tts-cpp
-powershell -ExecutionPolicy Bypass -File .\build.ps1 ^
-  -UseNinja ^
-  -EnableCuda ^
-  -EnableCudaGraphs ^
+```powershell
+powershell -ExecutionPolicy Bypass -File .\engine\build.ps1 `
+  -UseNinja `
+  -EnableCuda `
+  -EnableCudaGraphs `
   -Configuration Release
+```
 
-Build qwen3-tts-cpp-streaming:
-(top of repo)
-cmake -S . -B build
-cmake --build build --config Release
+Expected engine output:
 
-Record speaker reference wav:
-place in reference\ref.wav
-(if necessary) ffmpeg -i ref.wav -ac 1 -ar 24000 -sample_fmt s16 ref.wav
+```text
+engine\build\Release\tts_engine_cli.exe
+```
 
-Train the clone:
-third_party\qwen3-tts-cpp\build\qwen3-tts-cli.exe ^
-  -m models ^
-  -r reference\ref.wav ^
-  --dump-speaker-embedding reference\ref_speaker.json ^
-  -t "This is a test string."
+### 2. Build the streaming harness
 
-Stream command:
-build\Release\qwen3_streaming_cli.exe ^
-  -m models ^
-  --speaker-embedding reference\ref_speaker.json ^
-  -t "Hello. Welcome to Alfie's Bodega. How can I help you today?" ^
-  --instruct "happy" ^
-  -o examples\alfie.wav
+```powershell
+cmake -S . -B build `
+  -G "Visual Studio 17 2022" `
+  -A x64 `
+  -DGGML_CUDA=ON
+
+cmake --build build --config Release --target qwen3_streaming_cli
+```
+
+Expected harness output:
+
+```text
+build\Release\qwen3_streaming_cli.exe
+```
+
+The top-level build adds both `engine/` and `apps/streaming_cli/`, so you can also build both from the root workspace:
+
+```powershell
+cmake --build build --config Release --target tts_engine_cli qwen3_streaming_cli
+```
+
+## Models
+
+Shared models live under `models/`.
+
+Common files:
+
+```text
+models\
+  qwen3-tts-0.6b-f16.gguf
+  qwen3-tts-1.7b-base-f16.gguf
+  qwen3-tts-1.7b-customvoice-f16.gguf
+  qwen3-tts-tokenizer-f16.gguf
+```
+
+The engine keeps its own conversion and setup tooling under `engine/scripts/`.
+
+## Runtime
+
+### Engine CLI
+
+Basic engine invocation:
+
+```powershell
+engine\build\Release\tts_engine_cli.exe `
+  -m models `
+  -t "Hello from the engine layer." `
+  -o examples\engine_test.wav
+```
+
+### Streaming Harness
+
+The wrapper now links directly to the engine library instead of launching a sibling executable via `std::system`.
+
+Example:
+
+```powershell
+build\Release\qwen3_streaming_cli.exe `
+  -m models `
+  --model-identifier qwen3-tts-0.6b-f16 `
+  --speaker-embedding reference\alfie_0.6b_f16.json `
+  -t "Hello. Welcome to Alfie's Bodega. How can I help you today?" `
+  --instruct "happy" `
+  -o examples\alfie_06b_f16.wav
+```
+
+Realtime-oriented preset:
+
+```powershell
+build\Release\qwen3_streaming_cli.exe `
+  -m models `
+  --tts-profile realtime `
+  --speaker-embedding reference\alfie_0.6b_f16.json `
+  -t "Hello. Welcome to Alfie's Bodega. How can I help you today?" `
+  -o examples\alfie_realtime.wav
+```
+
+## Design Notes
+
+- `engine/` owns model loading, generation, streaming decode, playback behavior, and audio file output.
+- `apps/streaming_cli/` owns harness presets, CLI ergonomics, and experiment-oriented defaults.
+- Shared assets remain top-level so both layers use the same `models/`, `reference/`, and `examples/` directories.
+
+See [docs/architecture.md](C:/git/qwen3-tts-cpp-streaming/docs/architecture.md) for the current workspace architecture.

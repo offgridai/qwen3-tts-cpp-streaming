@@ -1,235 +1,109 @@
-# qwen3-tts-cpp-streaming Architecture
+# Workspace Architecture
 
 ## Purpose
 
-`qwen3-tts-cpp-streaming` is a low-latency native C++ streaming voice-clone system built on top of the open-source `qwen3-tts-cpp` project.
+This repository is organized as a native TTS workspace with a clear split between:
 
-The goal is real-time streaming TTS:
+- `engine/`: the core synthesis engine
+- `apps/streaming_cli/`: a thin streaming harness used for profiling and regression testing
 
-- First audio in ~175–325 ms
-- Continuous PCM streaming
-- Fully local execution (no cloud, no Python at runtime)
+The engine is part of the repository's primary codebase. It is no longer described or laid out as a third-party subtree.
 
----
-
-## Key Clarification
-
-The `qwen3-tts-cpp` repository is **not a vendored dependency**.
-
-It is:
-
-- an **upstream open-source project**
-- actively improved independently
-- the core engine powering this system
-
-This repo:
+## High-Level Flow
 
 ```text
-qwen3-tts-cpp-streaming
+streaming harness CLI
+        ↓
+engine C++ API
+        ↓
+tokenizer + speaker encoder + transformer + vocoder
+        ↓
+24 kHz mono PCM / WAV output
 ```
 
-is a **layer on top of that project**, adding:
+## Layer Responsibilities
 
-- streaming orchestration
-- stable defaults
-- contributor-facing API
-- integration surface (CLI, future Unreal/service)
-
-Think of it as:
-
-```text
-qwen3-tts-cpp       → engine (upstream OSS)
-qwen3-tts-cpp-streaming → streaming system + product layer
-```
-
----
-
-## High-Level Architecture
-
-```text
-CLI / API (this repo)
-        ↓
-Streaming layer (this repo)
-        ↓
-qwen3-tts-cpp engine (upstream OSS)
-        ↓
-Qwen3 model + vocoder
-        ↓
-streamed PCM audio
-```
-
----
-
-## Responsibilities Split
-
-### qwen3-tts-cpp (Upstream)
+### `engine/`
 
 Owns:
 
-- model loading
+- GGUF model loading
 - tokenizer
-- speaker embedding handling
-- transformer inference
-- vocoder decode
-- CUDA execution
+- speaker embedding extraction and reuse
+- autoregressive code generation
+- streaming decode strategy
+- live playback support
+- native engine CLI
+- correctness tests and model tooling
 
-### This Repository
+### `apps/streaming_cli/`
 
 Owns:
 
-- streaming strategy
-- latency optimizations
-- default configuration
-- CLI / integration surface
-- future API abstraction
-- service / Unreal integration
+- harness-specific CLI surface
+- profile aliases like `realtime`, `memory-saver`, and `ultra-low`
+- wrapper-specific defaults for latency experiments
+- integration-oriented packaging of the engine API
 
----
+## Important Change
 
-## Why This Separation Matters
+The wrapper no longer launches the engine CLI as a subprocess.
 
-Do NOT:
-
-- rewrite core inference here
-- fork unnecessarily
-- duplicate engine logic
-
-DO:
-
-- improve streaming behavior
-- upstream fixes where appropriate
-- keep integration layer clean
-
----
-
-## Streaming Strategy
-
-The system uses:
+Old path:
 
 ```text
-Incremental Tail-Context Streaming
+wrapper CLI → shell out to engine CLI
 ```
 
-Key idea:
+Current path:
 
 ```text
-decode only new frames
-+ small left context
-→ emit stable audio
+wrapper CLI → direct link to engine library
 ```
 
-Avoids:
+That removes:
 
-- robotic artifacts (independent windows)
-- O(N²) decode (prefix method)
+- executable path discovery
+- command-string assembly
+- duplicated flag forwarding
+- brittle runtime coupling between two binaries
 
----
-
-## Core Optimizations
-
-- Tail-context decode (no prefix recompute)
-- 1-frame first window
-- Immediate first-frame scheduling
-- Async decode pipeline
-- Playback thread isolation
-- Streaming prewarm
-- Minimal buffering
-
----
-
-## Performance
-
-Typical:
+## Build Layout
 
 ```text
-First PCM:     ~175–325 ms
-RTF:           ~0.8–1.2
+root CMakeLists.txt
+├── add_subdirectory(engine)
+└── add_subdirectory(apps/streaming_cli)
 ```
 
-This is sufficient for real-time dialogue.
+This produces two primary executables:
 
----
+- `tts_engine_cli`
+- `qwen3_streaming_cli`
 
-## Current Implementation
+## Shared Assets
 
-Today:
+The workspace keeps shared runtime data at the root:
 
-```text
-CLI → bridge → qwen3-tts-cli.exe
-```
+- `models/`
+- `reference/`
+- `examples/`
 
-This is transitional.
+That lets both layers operate on the same assets without maintaining duplicate copies under the engine or wrapper.
 
-Next step:
+## Consolidation Decisions
 
-```text
-CLI → direct C++ API → engine
-```
+To reduce redundancy:
 
----
-
-## Future API Shape
-
-```cpp
-class Qwen3StreamingTts {
-public:
-    bool load(...);
-    bool synthesize_streaming(...);
-};
-```
-
-With callback-based PCM delivery.
-
----
-
-## Build Flow
-
-```bat
-cd third_party\qwen3-tts-cpp
-build.ps1 -UseNinja -EnableCuda -Configuration Release
-
-cd ..
-cmake -S . -B build
-cmake --build build
-```
-
----
-
-## Runtime Requirements
-
-- NVIDIA GPU
-- CUDA driver
-- model files (not checked in)
-- speaker embedding JSON
-
----
-
-## Contributor Guidelines
-
-- Preserve baseline behavior
-- Measure before optimizing
-- Keep playback async
-- Do not reintroduce Python
-- Do not add HTTP layers
-- Keep system local-first
-
----
+- duplicated top-level engine scripts were removed
+- the engine remains the canonical home for model setup, benchmarking, and engine test tooling
+- the app layer contains only wrapper-specific source and build files
 
 ## Roadmap
 
-1. Remove subprocess bridge
-2. Expose PCM callback API
-3. Add cancellation
-4. Add service integration
-5. Improve packaging
+Remaining cleanup that still makes sense after this restructuring:
 
----
-
-## Summary
-
-This repo is:
-
-```text
-a streaming + integration layer
-on top of an upstream TTS engine
-```
+1. Rename internal namespaces and source file names away from `qwen3_tts`
+2. Add a true streaming chunk callback API to the engine layer
+3. Move more wrapper presets into explicit config objects
+4. Add app-specific tests for the harness layer
