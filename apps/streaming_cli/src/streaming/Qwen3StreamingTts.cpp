@@ -36,6 +36,7 @@ struct Qwen3StreamingTts::Impl {
     qwen3_tts::Qwen3TTS engine;
     std::string model_dir = "models";
     std::string loaded_model_name;
+    qwen3_tts::tts_model_capabilities caps;
     std::vector<float> speaker_embedding;
 };
 
@@ -79,6 +80,29 @@ bool Qwen3StreamingTts::synthesize_streaming(
             return false;
         }
         impl_->loaded_model_name = model_name;
+        impl_->caps = impl_->engine.get_model_capabilities();
+        std::cerr << "Loaded model type: " << impl_->caps.model_type
+                  << " | supports_instruction=" << (impl_->caps.supports_instruction ? "yes" : "no")
+                  << " | supports_voice_clone=" << (impl_->caps.supports_voice_clone ? "yes" : "no")
+                  << " | supports_named_speakers=" << (impl_->caps.supports_named_speakers ? "yes" : "no")
+                  << "\n";
+    }
+
+    const bool is_voice_design_model = impl_->caps.model_type == "voice_design";
+    if (options.voice_design && !is_voice_design_model) {
+        std::cerr << "--voice-design was requested, but loaded model type is '" << impl_->caps.model_type << "'\n";
+        return false;
+    }
+    if (is_voice_design_model && !options.voice_design) {
+        std::cerr << "VoiceDesign model detected; enabling voice-design behavior automatically.\n";
+    }
+    if (is_voice_design_model && options.instruction.empty()) {
+        std::cerr << "VoiceDesign requires a non-empty instruction. Use --voice-design-instruct or --instruction.\n";
+        return false;
+    }
+    if (is_voice_design_model && !impl_->speaker_embedding.empty()) {
+        std::cerr << "VoiceDesign does not accept speaker embeddings. Remove --speaker-embedding.\n";
+        return false;
     }
 
     qwen3_tts::tts_params params;

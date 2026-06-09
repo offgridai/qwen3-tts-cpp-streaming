@@ -21,10 +21,12 @@ int main(int argc, char** argv) {
         };
 
         if (a == "-m" || a == "--model") model_dir = next();
+        else if (a == "--voice-design") options.voice_design = true;
         else if (a == "--speaker-embedding") speaker_embedding = next();
         else if (a == "-t" || a == "--text") text = next();
         else if (a == "-o" || a == "--output") options.output_wav = next();
         else if (a == "--model-identifier" || a == "--model-name") options.model_identifier = next();
+        else if (a == "--voice-design-instruct") options.instruction = next();
         else if (a == "--instruction" || a == "--instruct") options.instruction = next();
         else if (a == "--tts-profile") {
             const std::string profile = next();
@@ -63,9 +65,17 @@ int main(int argc, char** argv) {
         else if (a == "--final-context-frames") options.final_context_frames = std::stoi(next());
         else if (a == "-h" || a == "--help") {
             std::cout << "Usage: qwen3_streaming_cli -m models --model-identifier qwen3-tts-0.6b-f16 --speaker-embedding speaker.json -t text -o out.wav\n"
+                      << "  --voice-design\n"
+                      << "  --voice-design-instruct <text>\n"
+                      << "  --instruction <text>\n"
                       << "  --tts-profile realtime|memory-saver|ultra-low\n"
                       << "  --live-preroll-ms <ms>\n"
-                      << "  --dump-streaming-overlap\n";
+                      << "  --dump-streaming-overlap\n"
+                      << "\n"
+                      << "VoiceDesign example:\n"
+                      << "  qwen3_streaming_cli -m models --voice-design --model-name qwen3-tts-1.7b-voicedesign-f16 "
+                         "--voice-design-instruct \"A calm, deep male narrator.\" -t \"I was not expecting visitors this late.\" "
+                         "-o examples\\voice_design.wav\n";
             return 0;
         }
     }
