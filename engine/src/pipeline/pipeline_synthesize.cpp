@@ -533,6 +533,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
     }
 
     int64_t t_generate_start = get_time_ms();
+    int64_t excluded_timing_ms = 0;
     if (!self.transformer_loaded_) {
         int64_t t_reload_start = get_time_ms();
         if (!self.transformer_.load_model(self.tts_model_path_)) {
@@ -690,6 +691,9 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                 }
             }
 
+            const int64_t prewarm_total_ms = get_time_ms() - prewarm_start_ms;
+            excluded_timing_ms += prewarm_total_ms;
+
             self.transformer_.clear_kv_cache();
             // Reset the real streaming timer after prewarm. Prewarm is intended to
             // happen at conversation/session start and is excluded from request timing.
@@ -702,7 +706,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                         warm_ok_count,
                         (long long) warm_generate_ms_total,
                         (long long) warm_decode_ms_total,
-                        (long long) (get_time_ms() - prewarm_start_ms));
+                        (long long) prewarm_total_ms);
             }
         }
 
@@ -1075,7 +1079,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
 
     result.sample_rate = self.audio_decoder_.get_config().sample_rate;
     result.success = true;
-    result.t_total_ms = get_time_ms() - t_total_start - live_playback_wait_ms;
+    result.t_total_ms = get_time_ms() - t_total_start - live_playback_wait_ms - excluded_timing_ms;
     if (result.t_total_ms < 0) { result.t_total_ms = 0; }
     sample_memory("synth/end");
 
