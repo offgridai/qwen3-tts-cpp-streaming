@@ -1,0 +1,1 @@
+build-vs2022-x64\apps\streaming_cli\Release\qwen3_streaming_cli.exe -m models --voice-design --model-name qwen3-tts-1.7b-voicedesign-f16 --voice-design-instruct "A 30-year-old woman with a rich, alluring voice." -t "I was not expecting visitors this late." -o examples\voice_design.wav

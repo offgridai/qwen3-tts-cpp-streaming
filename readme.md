@@ -73,6 +73,7 @@ models\
   qwen3-tts-0.6b-f16.gguf
   qwen3-tts-1.7b-base-f16.gguf
   qwen3-tts-1.7b-customvoice-f16.gguf
+  qwen3-tts-1.7b-voicedesign-f16.gguf
   qwen3-tts-tokenizer-f16.gguf
 ```
 
@@ -136,6 +137,24 @@ VoiceDesign notes:
 - `--voice-design-instruct` is the primary control surface for VoiceDesign runs.
 - Speaker embeddings are rejected for VoiceDesign models.
 - If a VoiceDesign model is loaded, the wrapper auto-detects it and enforces the correct input rules.
+
+## Performance Notes
+
+- Streaming prewarm is enabled by default and is excluded from the reported `Total` timing.
+- Realtime performance should be evaluated from the hot request path, not from one-time warmup cost.
+- The 0.6B streaming path is currently the best fit for low-latency repeated runtime synthesis.
+- The 1.7B VoiceDesign path is viable for direct streaming use, but a better production pattern is:
+  1. use VoiceDesign once to create a target voice
+  2. switch to a faster clone/custom runtime path for repeated lines
+
+Observed recent results:
+
+- `qwen3-tts-0.6b-f16` streaming:
+  - first PCM ready around `169-173 ms`
+  - throughput around `1.13x-1.22x realtime`
+- `qwen3-tts-1.7b-voicedesign-f16` streaming:
+  - first PCM ready around `173 ms`
+  - throughput around `1.16x realtime`
 
 ## Design Notes
 
