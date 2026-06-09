@@ -118,6 +118,25 @@ build\Release\qwen3_streaming_cli.exe `
   -o examples\alfie_realtime.wav
 ```
 
+VoiceDesign example:
+
+```powershell
+build\Release\qwen3_streaming_cli.exe `
+  -m models `
+  --voice-design `
+  --model-name qwen3-tts-1.7b-voicedesign-f16 `
+  --voice-design-instruct "A calm, deep male narrator with a restrained delivery." `
+  -t "I was not expecting visitors this late." `
+  -o examples\voice_design.wav
+```
+
+VoiceDesign notes:
+
+- The VoiceDesign workflow uses the distinct `qwen3-tts-1.7b-voicedesign-f16.gguf` model family.
+- `--voice-design-instruct` is the primary control surface for VoiceDesign runs.
+- Speaker embeddings are rejected for VoiceDesign models.
+- If a VoiceDesign model is loaded, the wrapper auto-detects it and enforces the correct input rules.
+
 ## Design Notes
 
 - `engine/` owns model loading, generation, streaming decode, playback behavior, and audio file output.

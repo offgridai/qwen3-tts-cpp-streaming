@@ -15,6 +15,7 @@ struct TtsStreamOptions {
     std::string output_wav = "examples/bridge_test.wav";
     std::string model_identifier;
     std::string instruction;
+    bool voice_design = false;
     bool dump_first_frame_profile = false;
     bool dump_streaming_overlap = false;
     int32_t live_preroll_ms = 0;
