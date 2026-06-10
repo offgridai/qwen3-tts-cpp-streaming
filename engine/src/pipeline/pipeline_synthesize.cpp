@@ -716,9 +716,15 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
         int32_t stream_window_index = 0;
         std::atomic<bool> stream_error{false};
         std::string stream_error_msg;
+        const size_t playable_50ms_samples = (size_t) (((int64_t) sample_rate * 50) / 1000);
+        const size_t playable_150ms_samples = (size_t) (((int64_t) sample_rate * 150) / 1000);
+        const size_t playable_200ms_samples = (size_t) (((int64_t) sample_rate * 200) / 1000);
         int64_t first_decode_ms = -1;
         int64_t first_window_queued_ms = -1;
         int64_t first_pcm_ready_ms = -1;
+        int64_t first_playable_50ms_ready_ms = -1;
+        int64_t first_playable_150ms_ready_ms = -1;
+        int64_t first_playable_200ms_ready_ms = -1;
         int64_t first_playback_enqueue_ms = -1;
         int64_t first_audio_ready_ms = -1;
         tts_generation_first_frame_profile first_frame_profile{};
@@ -779,6 +785,16 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             const size_t appended_samples = decoded.size() - drop_samples;
             const size_t append_offset = result.audio.size();
             result.audio.insert(result.audio.end(), decoded.begin() + (ptrdiff_t) drop_samples, decoded.end());
+            const size_t total_samples = result.audio.size();
+            if (first_playable_50ms_ready_ms < 0 && total_samples >= playable_50ms_samples) {
+                first_playable_50ms_ready_ms = get_time_ms() - t_generate_start;
+            }
+            if (first_playable_150ms_ready_ms < 0 && total_samples >= playable_150ms_samples) {
+                first_playable_150ms_ready_ms = get_time_ms() - t_generate_start;
+            }
+            if (first_playable_200ms_ready_ms < 0 && total_samples >= playable_200ms_samples) {
+                first_playable_200ms_ready_ms = get_time_ms() - t_generate_start;
+            }
             if (live_player && appended_samples > 0) {
                 if (first_playback_enqueue_ms < 0) {
                     first_playback_enqueue_ms = get_time_ms() - t_generate_start;
@@ -977,6 +993,9 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             fprintf(stderr, "  first window queued:         %lld ms\n", (long long) first_window_queued_ms);
             fprintf(stderr, "  first tail decode:           %lld ms\n", (long long) first_decode_ms);
             fprintf(stderr, "  first PCM ready:             %lld ms\n", (long long) first_pcm_ready_ms);
+            fprintf(stderr, "  first 50ms playable:         %lld ms\n", (long long) first_playable_50ms_ready_ms);
+            fprintf(stderr, "  first 150ms playable:        %lld ms\n", (long long) first_playable_150ms_ready_ms);
+            fprintf(stderr, "  first 200ms playable:        %lld ms\n", (long long) first_playable_200ms_ready_ms);
             if (live_player) {
                 const int64_t first_submit = live_player->first_submit_ms();
                 fprintf(stderr, "  first playback enqueue:      %lld ms\n", (long long) first_playback_enqueue_ms);
