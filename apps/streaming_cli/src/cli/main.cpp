@@ -28,6 +28,10 @@ int main(int argc, char** argv) {
         else if (a == "--model-identifier" || a == "--model-name") options.model_identifier = next();
         else if (a == "--voice-design-instruct") options.instruction = next();
         else if (a == "--instruction" || a == "--instruct") options.instruction = next();
+        else if (a == "--temperature") options.temperature = std::stof(next());
+        else if (a == "--top-k") options.top_k = std::stoi(next());
+        else if (a == "--top-p") options.top_p = std::stof(next());
+        else if (a == "--repetition-penalty") options.repetition_penalty = std::stof(next());
         else if (a == "--tts-profile") {
             const std::string profile = next();
             if (profile == "realtime") {
@@ -68,6 +72,10 @@ int main(int argc, char** argv) {
                       << "  --voice-design\n"
                       << "  --voice-design-instruct <text>\n"
                       << "  --instruction <text>\n"
+                      << "  --temperature <float>\n"
+                      << "  --top-k <int>\n"
+                      << "  --top-p <float>\n"
+                      << "  --repetition-penalty <float>\n"
                       << "  --tts-profile realtime|memory-saver|ultra-low\n"
                       << "  --live-preroll-ms <ms>\n"
                       << "  --dump-streaming-overlap\n"

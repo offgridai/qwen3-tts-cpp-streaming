@@ -16,6 +16,10 @@ struct TtsStreamOptions {
     std::string model_identifier;
     std::string instruction;
     bool voice_design = false;
+    float temperature = 0.9f;
+    int32_t top_k = 75;
+    float top_p = 1.0f;
+    float repetition_penalty = 1.05f;
     bool dump_first_frame_profile = false;
     bool dump_streaming_overlap = false;
     int32_t live_preroll_ms = 0;

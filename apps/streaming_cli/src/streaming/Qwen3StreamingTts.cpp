@@ -108,9 +108,10 @@ bool Qwen3StreamingTts::synthesize_streaming(
     qwen3_tts::tts_params params;
     params.print_progress = true;
     params.print_timing = true;
-    params.temperature = 0.9f;
-    params.top_k = 75;
-    params.top_p = 1.0f;
+    params.temperature = options.temperature;
+    params.top_k = options.top_k;
+    params.top_p = options.top_p;
+    params.repetition_penalty = options.repetition_penalty;
     params.streaming_generate = true;
     params.async_streaming_decode = true;
     params.play_streaming = true;
