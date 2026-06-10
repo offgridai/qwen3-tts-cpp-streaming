@@ -108,6 +108,7 @@ bool Qwen3StreamingTts::synthesize_streaming(
     qwen3_tts::tts_params params;
     params.print_progress = true;
     params.print_timing = true;
+    params.max_audio_tokens = options.max_audio_tokens;
     params.temperature = options.temperature;
     params.top_k = options.top_k;
     params.top_p = options.top_p;
@@ -124,6 +125,8 @@ bool Qwen3StreamingTts::synthesize_streaming(
     params.ramp_tail_window_count = options.ramp_tail_window_count;
     params.steady_tail_window_frames = options.steady_tail_window_frames;
     params.context_frames = options.context_frames;
+    params.early_context_frames = options.early_context_frames;
+    params.early_context_window_count = options.early_context_window_count;
     params.final_context_frames = options.final_context_frames;
     params.adaptive_steady_windows = options.adaptive_steady_windows;
     params.adaptive_min_tail_window_frames = options.adaptive_min_tail_window_frames;
