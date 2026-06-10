@@ -667,6 +667,10 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
         const int32_t ramp_window_count = std::max<int32_t>(0, params.ramp_tail_window_count);
         const int32_t steady_window = clamp_positive(params.steady_tail_window_frames, 8);
         const int32_t context_frames = std::max<int32_t>(0, params.context_frames);
+        const int32_t early_context_frames = params.early_context_frames > 0
+            ? std::max<int32_t>(0, params.early_context_frames)
+            : context_frames;
+        const int32_t early_context_window_count = std::max<int32_t>(0, params.early_context_window_count);
         const int32_t final_context_frames = std::max<int32_t>(context_frames, params.final_context_frames > 0 ? params.final_context_frames : context_frames);
         const int32_t sample_rate = self.audio_decoder_.get_config().sample_rate;
         const bool paced_delivery = params.paced_audio_delivery && (bool) params.audio_chunk_callback;
@@ -868,11 +872,11 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
         if (params.print_progress) {
             fprintf(stderr,
                     "\nIncremental tail-context streaming generate/decode enabled%s%s:\n"
-                    "  first_tail_window_frames=%d ramp_tail_window_frames=%d ramp_tail_window_count=%d steady_tail_window_frames=%d context_frames=%d final_context_frames=%d live_preroll_ms=%d adaptive_steady_windows=%s adaptive_min_tail_window_frames=%d adaptive_low_watermark_ms=%d adaptive_high_watermark_ms=%d paced_audio_delivery=%s delivery_chunk_ms=%d delivery_start_buffer_ms=%d delivery_target_lead_ms=%d\n"
+                    "  first_tail_window_frames=%d ramp_tail_window_frames=%d ramp_tail_window_count=%d steady_tail_window_frames=%d context_frames=%d early_context_frames=%d early_context_window_count=%d final_context_frames=%d live_preroll_ms=%d adaptive_steady_windows=%s adaptive_min_tail_window_frames=%d adaptive_low_watermark_ms=%d adaptive_high_watermark_ms=%d paced_audio_delivery=%s delivery_chunk_ms=%d delivery_start_buffer_ms=%d delivery_target_lead_ms=%d\n"
                     "   index       ctx       new       end    frames   decode_ms     dropped    appended  status\n",
                     params.async_streaming_decode ? " (async decode)" : "",
                     live_player ? " (live playback)" : "",
-                    first_window, ramp_window, ramp_window_count, steady_window, context_frames, final_context_frames, params.live_preroll_ms,
+                    first_window, ramp_window, ramp_window_count, steady_window, context_frames, early_context_frames, early_context_window_count, final_context_frames, params.live_preroll_ms,
                     adaptive_windows ? "on" : "off",
                     adaptive_min_window,
                     adaptive_low_watermark_ms,
@@ -1171,6 +1175,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
         };
 
         int32_t ramp_windows_remaining = ramp_window_count;
+        int32_t early_context_windows_remaining = early_context_window_count;
         auto select_next_tail_window_frames = [&]() -> int32_t {
             if (ramp_windows_remaining > 0) {
                 --ramp_windows_remaining;
@@ -1180,34 +1185,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             return select_steady_window_frames();
         };
 
-        auto enqueue_tail_window = [&](const std::vector<int32_t> & all_codes, int32_t end_frame, bool is_final) -> bool {
-            if (end_frame <= last_enqueued_frame) {
-                return true;
-            }
-            const int32_t new_start = last_enqueued_frame;
-            const int32_t effective_context_frames = is_final ? final_context_frames : context_frames;
-            const int32_t ctx_start = std::max<int32_t>(0, new_start - effective_context_frames);
-            const int32_t local_frames = end_frame - ctx_start;
-            if (local_frames <= 0) {
-                return true;
-            }
-
-            DecodeJob job;
-            job.index = stream_window_index++;
-            job.queued_ms = get_time_ms() - t_generate_start;
-            if (job.index == 0 && first_window_queued_ms < 0) {
-                first_window_queued_ms = job.queued_ms;
-            }
-            job.ctx_start = ctx_start;
-            job.new_start = new_start;
-            job.end_frame = end_frame;
-            job.local_frames = local_frames;
-            job.is_final = is_final;
-            const int32_t * local_codes = all_codes.data() + (size_t) ctx_start * n_codebooks;
-            job.local_codes.assign(local_codes, local_codes + (size_t) local_frames * n_codebooks);
-
-            last_enqueued_frame = end_frame;
-
+        auto submit_decode_job = [&](DecodeJob && job) -> bool {
             if (params.async_streaming_decode) {
                 {
                     std::lock_guard<std::mutex> lock(queue_mutex);
@@ -1216,8 +1194,45 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                 queue_cv.notify_one();
                 return true;
             }
-
             return process_decode_job(job);
+        };
+
+        auto enqueue_tail_window = [&](const std::vector<int32_t> & all_codes, int32_t end_frame, bool is_final) -> bool {
+            if (end_frame <= last_enqueued_frame) {
+                return true;
+            }
+            const int32_t new_start = last_enqueued_frame;
+            int32_t effective_context_frames = is_final ? final_context_frames : context_frames;
+            if (!is_final && early_context_windows_remaining > 0) {
+                effective_context_frames = early_context_frames;
+                --early_context_windows_remaining;
+            }
+            const int32_t ctx_start = std::max<int32_t>(0, new_start - effective_context_frames);
+            const int32_t local_frames = end_frame - ctx_start;
+            if (local_frames <= 0) {
+                return true;
+            }
+            const auto make_job = [&](int32_t job_ctx_start, int32_t job_new_start, int32_t job_end_frame, bool job_final) {
+                DecodeJob job;
+                job.index = stream_window_index++;
+                job.queued_ms = get_time_ms() - t_generate_start;
+                if (job.index == 0 && first_window_queued_ms < 0) {
+                    first_window_queued_ms = job.queued_ms;
+                }
+                job.ctx_start = job_ctx_start;
+                job.new_start = job_new_start;
+                job.end_frame = job_end_frame;
+                job.local_frames = job_end_frame - job_ctx_start;
+                job.is_final = job_final;
+                const int32_t * local_codes = all_codes.data() + (size_t) job_ctx_start * n_codebooks;
+                job.local_codes.assign(local_codes, local_codes + (size_t) job.local_frames * n_codebooks);
+                return job;
+            };
+
+            last_enqueued_frame = end_frame;
+
+            DecodeJob job = make_job(ctx_start, new_start, end_frame, is_final);
+            return submit_decode_job(std::move(job));
         };
 
         if (params.async_streaming_decode) {

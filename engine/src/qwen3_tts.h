@@ -63,6 +63,10 @@ struct tts_params {
     int32_t ramp_tail_window_count = 0;
     int32_t steady_tail_window_frames = 8;
     int32_t context_frames = 3;
+    // Optional reduced left-context for early non-final windows. <=0 means
+    // use context_frames for every non-final window.
+    int32_t early_context_frames = 0;
+    int32_t early_context_window_count = 0;
     // Optional larger context for the final streaming window. A short steady-state
     // context is good for latency, but the last acoustic tail can need more left
     // context to avoid sounding clipped/truncated. <=0 means use context_frames.

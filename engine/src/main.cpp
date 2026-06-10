@@ -274,6 +274,18 @@ int main(int argc, char ** argv) {
                 return 1;
             }
             params.context_frames = std::stoi(args[i]);
+        } else if (arg == "--early-context-frames") {
+            if (++i >= (int) args.size()) {
+                fprintf(stderr, "Error: missing early-context-frames value\n");
+                return 1;
+            }
+            params.early_context_frames = std::stoi(args[i]);
+        } else if (arg == "--early-context-window-count") {
+            if (++i >= (int) args.size()) {
+                fprintf(stderr, "Error: missing early-context-window-count value\n");
+                return 1;
+            }
+            params.early_context_window_count = std::stoi(args[i]);
         } else if (arg == "--final-context-frames") {
             if (++i >= (int) args.size()) {
                 fprintf(stderr, "Error: missing final-context-frames value\n");

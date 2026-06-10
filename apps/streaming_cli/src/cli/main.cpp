@@ -29,6 +29,7 @@ int main(int argc, char** argv) {
         else if (a == "--model-identifier" || a == "--model-name") options.model_identifier = next();
         else if (a == "--voice-design-instruct") options.instruction = next();
         else if (a == "--instruction" || a == "--instruct") options.instruction = next();
+        else if (a == "--max-tokens") options.max_audio_tokens = std::stoi(next());
         else if (a == "--temperature") options.temperature = std::stof(next());
         else if (a == "--top-k") options.top_k = std::stoi(next());
         else if (a == "--top-p") options.top_p = std::stof(next());
@@ -43,6 +44,8 @@ int main(int argc, char** argv) {
                 options.ramp_tail_window_count = 0;
                 options.steady_tail_window_frames = 8;
                 options.context_frames = 3;
+                options.early_context_frames = 0;
+                options.early_context_window_count = 0;
                 options.final_context_frames = 4;
             } else if (profile == "memory-saver") {
                 options.model_identifier = "qwen3-tts-0.6b-q5_k";
@@ -52,6 +55,8 @@ int main(int argc, char** argv) {
                 options.ramp_tail_window_count = 0;
                 options.steady_tail_window_frames = 8;
                 options.context_frames = 3;
+                options.early_context_frames = 0;
+                options.early_context_window_count = 0;
                 options.final_context_frames = 4;
             } else if (profile == "ultra-low") {
                 options.model_identifier = "qwen3-tts-0.6b-q4_k";
@@ -61,6 +66,8 @@ int main(int argc, char** argv) {
                 options.ramp_tail_window_count = 0;
                 options.steady_tail_window_frames = 8;
                 options.context_frames = 3;
+                options.early_context_frames = 0;
+                options.early_context_window_count = 0;
                 options.final_context_frames = 4;
             } else {
                 std::cerr << "Unknown --tts-profile '" << profile << "'. Expected realtime, memory-saver, or ultra-low.\n";
@@ -75,6 +82,8 @@ int main(int argc, char** argv) {
         else if (a == "--ramp-tail-window-count") options.ramp_tail_window_count = std::stoi(next());
         else if (a == "--steady-tail-window-frames") options.steady_tail_window_frames = std::stoi(next());
         else if (a == "--context-frames") options.context_frames = std::stoi(next());
+        else if (a == "--early-context-frames") options.early_context_frames = std::stoi(next());
+        else if (a == "--early-context-window-count") options.early_context_window_count = std::stoi(next());
         else if (a == "--final-context-frames") options.final_context_frames = std::stoi(next());
         else if (a == "--adaptive-steady-windows") options.adaptive_steady_windows = true;
         else if (a == "--no-adaptive-steady-windows") options.adaptive_steady_windows = false;
@@ -92,6 +101,7 @@ int main(int argc, char** argv) {
                       << "  --voice-design\n"
                       << "  --voice-design-instruct <text>\n"
                       << "  --instruction <text>\n"
+                      << "  --max-tokens <int>\n"
                       << "  --temperature <float>\n"
                       << "  --top-k <int>\n"
                       << "  --top-p <float>\n"
@@ -100,6 +110,8 @@ int main(int argc, char** argv) {
                       << "  --live-preroll-ms <ms>\n"
                       << "  --ramp-tail-window-frames <n>\n"
                       << "  --ramp-tail-window-count <n>\n"
+                      << "  --early-context-frames <n>\n"
+                      << "  --early-context-window-count <n>\n"
                       << "  --adaptive-steady-windows | --no-adaptive-steady-windows\n"
                       << "  --adaptive-min-tail-window-frames <n>\n"
                       << "  --adaptive-low-watermark-ms <ms>\n"

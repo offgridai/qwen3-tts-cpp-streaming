@@ -20,6 +20,7 @@ struct TtsStreamOptions {
     int32_t top_k = 75;
     float top_p = 1.0f;
     float repetition_penalty = 1.05f;
+    int32_t max_audio_tokens = 4096;
     bool dump_first_frame_profile = false;
     bool dump_streaming_overlap = false;
     int32_t live_preroll_ms = 150;
@@ -28,6 +29,8 @@ struct TtsStreamOptions {
     int32_t ramp_tail_window_count = 0;
     int32_t steady_tail_window_frames = 8;
     int32_t context_frames = 3;
+    int32_t early_context_frames = 0;
+    int32_t early_context_window_count = 0;
     int32_t final_context_frames = 4;
     bool adaptive_steady_windows = false;
     int32_t adaptive_min_tail_window_frames = 4;
