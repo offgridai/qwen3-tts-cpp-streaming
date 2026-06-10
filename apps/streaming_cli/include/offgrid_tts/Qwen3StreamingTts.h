@@ -22,11 +22,21 @@ struct TtsStreamOptions {
     float repetition_penalty = 1.05f;
     bool dump_first_frame_profile = false;
     bool dump_streaming_overlap = false;
-    int32_t live_preroll_ms = 0;
-    int32_t first_tail_window_frames = 1;
-    int32_t steady_tail_window_frames = 12;
-    int32_t context_frames = 4;
+    int32_t live_preroll_ms = 150;
+    int32_t first_tail_window_frames = 3;
+    int32_t ramp_tail_window_frames = 6;
+    int32_t ramp_tail_window_count = 0;
+    int32_t steady_tail_window_frames = 8;
+    int32_t context_frames = 3;
     int32_t final_context_frames = 4;
+    bool adaptive_steady_windows = false;
+    int32_t adaptive_min_tail_window_frames = 4;
+    int32_t adaptive_low_watermark_ms = 250;
+    int32_t adaptive_high_watermark_ms = 900;
+    bool paced_audio_delivery = false;
+    int32_t delivery_chunk_ms = 80;
+    int32_t delivery_start_buffer_ms = 150;
+    int32_t delivery_target_lead_ms = 500;
 };
 
 using TtsChunkCallback = std::function<void(const TtsStreamChunk&)>;

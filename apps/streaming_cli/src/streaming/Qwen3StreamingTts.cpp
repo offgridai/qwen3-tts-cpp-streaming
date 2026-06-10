@@ -120,11 +120,34 @@ bool Qwen3StreamingTts::synthesize_streaming(
     params.instruction = options.instruction;
     params.live_preroll_ms = options.live_preroll_ms;
     params.first_tail_window_frames = options.first_tail_window_frames;
+    params.ramp_tail_window_frames = options.ramp_tail_window_frames;
+    params.ramp_tail_window_count = options.ramp_tail_window_count;
     params.steady_tail_window_frames = options.steady_tail_window_frames;
     params.context_frames = options.context_frames;
     params.final_context_frames = options.final_context_frames;
+    params.adaptive_steady_windows = options.adaptive_steady_windows;
+    params.adaptive_min_tail_window_frames = options.adaptive_min_tail_window_frames;
+    params.adaptive_low_watermark_ms = options.adaptive_low_watermark_ms;
+    params.adaptive_high_watermark_ms = options.adaptive_high_watermark_ms;
+    params.paced_audio_delivery = options.paced_audio_delivery;
+    params.delivery_chunk_ms = options.delivery_chunk_ms;
+    params.delivery_start_buffer_ms = options.delivery_start_buffer_ms;
+    params.delivery_target_lead_ms = options.delivery_target_lead_ms;
     params.dump_first_frame_profile = options.dump_first_frame_profile;
     params.dump_streaming_overlap = options.dump_streaming_overlap;
+    if (on_chunk) {
+        params.audio_chunk_callback =
+            [on_chunk](const float* samples, int32_t n_samples, int32_t sample_rate, bool is_final) -> bool {
+                TtsStreamChunk chunk;
+                chunk.sample_rate = sample_rate;
+                chunk.is_final = is_final;
+                if (samples && n_samples > 0) {
+                    chunk.samples.assign(samples, samples + n_samples);
+                }
+                on_chunk(chunk);
+                return true;
+            };
+    }
 
     qwen3_tts::tts_result result;
     if (!impl_->speaker_embedding.empty()) {
@@ -146,7 +169,7 @@ bool Qwen3StreamingTts::synthesize_streaming(
         return false;
     }
 
-    if (on_chunk) {
+    if (on_chunk && !params.paced_audio_delivery) {
         on_chunk(TtsStreamChunk{result.audio, result.sample_rate, true});
     }
 

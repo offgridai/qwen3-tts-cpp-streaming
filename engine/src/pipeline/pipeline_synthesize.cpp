@@ -58,6 +58,20 @@ size_t qwen3_decoder_samples_for_frames(int32_t n_frames, int32_t sample_rate) {
     return samples > 0 ? (size_t) samples : 0;
 }
 
+double qwen3_samples_to_ms(size_t n_samples, int32_t sample_rate) {
+    if (sample_rate <= 0) {
+        return 0.0;
+    }
+    return 1000.0 * (double) n_samples / (double) sample_rate;
+}
+
+int32_t clamp_window_frames(int32_t value, int32_t min_value, int32_t max_value) {
+    if (max_value < min_value) {
+        return min_value;
+    }
+    return std::max(min_value, std::min(value, max_value));
+}
+
 
 class StreamingAudioPlayer {
 public:
@@ -71,6 +85,7 @@ public:
         sample_rate_ = sample_rate;
         preroll_samples_ = live_preroll_ms > 0 ? (size_t) (((int64_t) sample_rate * live_preroll_ms) / 1000) : 0;
         playback_started_ = preroll_samples_ == 0;
+        starvation_active_ = false;
         preroll_buffer_.clear();
         if (sample_rate <= 0) { last_error_ = "invalid sample rate"; return false; }
         WAVEFORMATEX fmt{};
@@ -97,13 +112,17 @@ public:
     }
 
     bool write(const std::vector<float> & samples, size_t offset, size_t count) {
+        if (offset >= samples.size() || count == 0) { return true; }
+        return write(samples.data() + offset, count);
+    }
+
+    bool write(const float * samples, size_t count) {
 #ifdef _WIN32
-        if (!wave_out_ || offset >= samples.size() || count == 0) { return true; }
-        count = std::min(count, samples.size() - offset);
+        if (!wave_out_ || !samples || count == 0) { return true; }
 
         std::vector<int16_t> pcm(count);
         for (size_t i = 0; i < count; ++i) {
-            float v = samples[offset + i];
+            float v = samples[i];
             if (v > 1.0f) v = 1.0f;
             if (v < -1.0f) v = -1.0f;
             pcm[i] = (int16_t) (v * 32767.0f);
@@ -133,7 +152,7 @@ public:
         }
         return true;
 #else
-        (void) samples; (void) offset; (void) count;
+        (void) samples; (void) count;
         return true;
 #endif
     }
@@ -168,11 +187,32 @@ public:
 
     const std::string & last_error() const { return last_error_; }
     int64_t first_submit_ms() const { return first_submit_ms_.load(); }
+    int64_t first_starvation_ms() const { return first_starvation_ms_.load(); }
+    int32_t starvation_events() const { return starvation_events_.load(); }
+    double queued_audio_ms() const {
+#ifdef _WIN32
+        std::lock_guard<std::mutex> lock(mutex_);
+        return qwen3_samples_to_ms(queued_samples_locked(), sample_rate_);
+#else
+        return 0.0;
+#endif
+    }
+    double queued_audio_at_first_submit_ms() const {
+#ifdef _WIN32
+        return qwen3_samples_to_ms((size_t) std::max<int64_t>(0, queued_samples_at_first_submit_.load()), sample_rate_);
+#else
+        return 0.0;
+#endif
+    }
 
     void reset_timing_base(int64_t stream_start_ms) {
 #ifdef _WIN32
         stream_start_ms_ = stream_start_ms;
         first_submit_ms_.store(-1);
+        first_starvation_ms_.store(-1);
+        starvation_events_.store(0);
+        queued_samples_at_first_submit_.store(0);
+        starvation_active_ = false;
 #else
         (void) stream_start_ms;
 #endif
@@ -181,6 +221,17 @@ public:
 private:
 #ifdef _WIN32
     struct PendingChunk { std::vector<int16_t> pcm; WAVEHDR hdr{}; };
+
+    size_t queued_samples_locked() const {
+        size_t total = preroll_buffer_.size();
+        for (const auto & pcm : queue_) {
+            total += pcm.size();
+        }
+        for (const auto & chunk : pending_) {
+            total += chunk->pcm.size();
+        }
+        return total;
+    }
 
     void retire_completed(bool wait_all) {
         if (!wave_out_) { return; }
@@ -220,7 +271,17 @@ private:
         }
         int64_t expected = -1;
         const int64_t submitted_ms = stream_start_ms_ > 0 ? (get_time_ms() - stream_start_ms_) : 0;
-        first_submit_ms_.compare_exchange_strong(expected, submitted_ms);
+        if (first_submit_ms_.compare_exchange_strong(expected, submitted_ms)) {
+            size_t queued_samples = chunk->pcm.size();
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                queued_samples += queued_samples_locked();
+            }
+            queued_samples_at_first_submit_.store((int64_t) queued_samples);
+            fprintf(stderr, "  [player] playback_start wall_ms=%lld queued_audio_ms=%.1f\n",
+                    (long long) submitted_ms,
+                    qwen3_samples_to_ms(queued_samples, sample_rate_));
+        }
         pending_.push_back(std::move(chunk));
         return true;
     }
@@ -230,6 +291,24 @@ private:
             std::vector<int16_t> pcm;
             {
                 std::unique_lock<std::mutex> lock(mutex_);
+                if (!queue_.empty() || !pending_.empty()) {
+                    starvation_active_ = false;
+                }
+                if (!stopping_ &&
+                    playback_started_ &&
+                    first_submit_ms_.load() >= 0 &&
+                    queue_.empty() &&
+                    pending_.empty() &&
+                    !starvation_active_) {
+                    const int64_t starvation_ms = stream_start_ms_ > 0 ? (get_time_ms() - stream_start_ms_) : 0;
+                    int64_t expected = -1;
+                    first_starvation_ms_.compare_exchange_strong(expected, starvation_ms);
+                    const int32_t event_index = starvation_events_.fetch_add(1) + 1;
+                    starvation_active_ = true;
+                    fprintf(stderr, "  [player] starvation event=%d wall_ms=%lld\n",
+                            event_index,
+                            (long long) starvation_ms);
+                }
                 cv_.wait(lock, [this]() {
                     return stopping_ || !queue_.empty();
                 });
@@ -257,7 +336,7 @@ private:
     HWAVEOUT wave_out_ = nullptr;
     std::deque<std::vector<int16_t>> queue_;
     std::deque<std::unique_ptr<PendingChunk>> pending_;
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     std::condition_variable cv_;
     std::thread worker_;
     bool stopping_ = false;
@@ -267,6 +346,10 @@ private:
     bool playback_started_ = true;
     int64_t stream_start_ms_ = 0;
     std::atomic<int64_t> first_submit_ms_{-1};
+    std::atomic<int64_t> first_starvation_ms_{-1};
+    std::atomic<int32_t> starvation_events_{0};
+    std::atomic<int64_t> queued_samples_at_first_submit_{0};
+    bool starvation_active_ = false;
 #endif
     std::string last_error_;
 };
@@ -475,6 +558,9 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                                                        const tts_params & params,
                                                        tts_result & result) {
     int64_t t_total_start = get_time_ms();
+    fprintf(stderr, "\n[stream] request_accepted wall_ms=0 text_bytes=%zu has_instruction=%s\n",
+            text.size(),
+            params.instruction.empty() ? "no" : "yes");
     auto sample_memory = [&](const char * stage) {
         process_memory_snapshot mem;
         if (!get_process_memory_snapshot(mem)) {
@@ -576,11 +662,24 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             }
         }
 
-        const int32_t first_window = clamp_positive(params.first_tail_window_frames, 4);
-        const int32_t steady_window = clamp_positive(params.steady_tail_window_frames, 12);
+        const int32_t first_window = clamp_positive(params.first_tail_window_frames, 3);
+        const int32_t ramp_window = clamp_positive(params.ramp_tail_window_frames, 6);
+        const int32_t ramp_window_count = std::max<int32_t>(0, params.ramp_tail_window_count);
+        const int32_t steady_window = clamp_positive(params.steady_tail_window_frames, 8);
         const int32_t context_frames = std::max<int32_t>(0, params.context_frames);
         const int32_t final_context_frames = std::max<int32_t>(context_frames, params.final_context_frames > 0 ? params.final_context_frames : context_frames);
         const int32_t sample_rate = self.audio_decoder_.get_config().sample_rate;
+        const bool paced_delivery = params.paced_audio_delivery && (bool) params.audio_chunk_callback;
+        const size_t delivery_chunk_samples = (size_t) std::max<int64_t>(1, ((int64_t) sample_rate * std::max<int32_t>(1, params.delivery_chunk_ms)) / 1000);
+        const size_t delivery_start_buffer_samples = (size_t) std::max<int64_t>(1, ((int64_t) sample_rate * std::max<int32_t>(1, params.delivery_start_buffer_ms)) / 1000);
+        const size_t delivery_target_lead_samples = (size_t) std::max<int64_t>(0, ((int64_t) sample_rate * std::max<int32_t>(0, params.delivery_target_lead_ms)) / 1000);
+        const bool adaptive_windows = params.adaptive_steady_windows;
+        const int32_t adaptive_min_window = clamp_window_frames(
+            clamp_positive(params.adaptive_min_tail_window_frames, 4), 1, steady_window);
+        const int32_t adaptive_low_watermark_ms = std::max<int32_t>(0, params.adaptive_low_watermark_ms);
+        const int32_t adaptive_high_watermark_ms = std::max<int32_t>(
+            adaptive_low_watermark_ms,
+            params.adaptive_high_watermark_ms > 0 ? params.adaptive_high_watermark_ms : adaptive_low_watermark_ms);
 
         if (params.prewarm_streaming) {
             const int64_t prewarm_start_ms = get_time_ms();
@@ -631,6 +730,27 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                             }
                         }
                         warm_decode_ms += get_time_ms() - decode_start_ms;
+                    }
+
+                    // Warm the optional early ramp decode shape. This targets the
+                    // low-latency follow-up windows immediately after first audio.
+                    if (ramp_window_count > 0) {
+                        const int32_t ramp_local_frames = context_frames + ramp_window;
+                        if (ramp_local_frames > 0) {
+                            std::vector<int32_t> ramp_codes((size_t) ramp_local_frames * (size_t) n_codebooks, 0);
+                            if (warm_code_frames >= ramp_local_frames) {
+                                ramp_codes.assign(warm_codes.begin(),
+                                                  warm_codes.begin() + (size_t) ramp_local_frames * n_codebooks);
+                            }
+                            const int64_t decode_start_ms = get_time_ms();
+                            if (!self.audio_decoder_.decode(ramp_codes.data(), ramp_local_frames, warm_audio)) {
+                                if (params.print_progress) {
+                                    fprintf(stderr, "Warning: ramp-window decoder prewarm failed: %s\n",
+                                            self.audio_decoder_.get_error().c_str());
+                                }
+                            }
+                            warm_decode_ms += get_time_ms() - decode_start_ms;
+                        }
                     }
 
                     // Warm the common steady tail-context local graph size:
@@ -727,6 +847,12 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
         int64_t first_playable_200ms_ready_ms = -1;
         int64_t first_playback_enqueue_ms = -1;
         int64_t first_audio_ready_ms = -1;
+        int64_t prev_window_ready_ms = -1;
+        int64_t first_window_ready_ms = -1;
+        int64_t second_window_gap_ms = -1;
+        int64_t max_window_gap_ms = -1;
+        std::atomic<int64_t> emitted_audio_samples{0};
+        std::atomic<int32_t> last_selected_tail_window{steady_window};
         tts_generation_first_frame_profile first_frame_profile{};
 
         std::unique_ptr<StreamingAudioPlayer> live_player;
@@ -742,11 +868,133 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
         if (params.print_progress) {
             fprintf(stderr,
                     "\nIncremental tail-context streaming generate/decode enabled%s%s:\n"
-                    "  first_tail_window_frames=%d steady_tail_window_frames=%d context_frames=%d final_context_frames=%d live_preroll_ms=%d\n"
+                    "  first_tail_window_frames=%d ramp_tail_window_frames=%d ramp_tail_window_count=%d steady_tail_window_frames=%d context_frames=%d final_context_frames=%d live_preroll_ms=%d adaptive_steady_windows=%s adaptive_min_tail_window_frames=%d adaptive_low_watermark_ms=%d adaptive_high_watermark_ms=%d paced_audio_delivery=%s delivery_chunk_ms=%d delivery_start_buffer_ms=%d delivery_target_lead_ms=%d\n"
                     "   index       ctx       new       end    frames   decode_ms     dropped    appended  status\n",
                     params.async_streaming_decode ? " (async decode)" : "",
                     live_player ? " (live playback)" : "",
-                    first_window, steady_window, context_frames, final_context_frames, params.live_preroll_ms);
+                    first_window, ramp_window, ramp_window_count, steady_window, context_frames, final_context_frames, params.live_preroll_ms,
+                    adaptive_windows ? "on" : "off",
+                    adaptive_min_window,
+                    adaptive_low_watermark_ms,
+                    adaptive_high_watermark_ms,
+                    paced_delivery ? "on" : "off",
+                    params.delivery_chunk_ms,
+                    params.delivery_start_buffer_ms,
+                    params.delivery_target_lead_ms);
+        }
+
+        struct PacedDeliveryState {
+            std::mutex mutex;
+            std::condition_variable cv;
+            std::vector<float> buffered;
+            size_t emitted_samples = 0;
+            size_t first_emit_samples = 0;
+            bool finalized = false;
+            bool failed = false;
+            bool playback_started = false;
+            int64_t first_emit_wall_ms = -1;
+            int32_t chunk_index = 0;
+            std::string error_msg;
+        } delivery_state;
+
+        auto emit_delivery_chunk = [&](const float * chunk, size_t count, bool is_final, int64_t wall_ms) -> bool {
+            const double audio_ms = qwen3_samples_to_ms(count, sample_rate);
+            if (params.audio_chunk_callback) {
+                fprintf(stderr,
+                        "[deliver] chunk_index=%d samples=%zu audio_ms=%.1f wall_ms_since_request=%lld final=%s\n",
+                        delivery_state.chunk_index,
+                        count,
+                        audio_ms,
+                        (long long) wall_ms,
+                        is_final ? "yes" : "no");
+                if (!params.audio_chunk_callback(chunk, (int32_t) count, sample_rate, is_final)) {
+                    delivery_state.error_msg = "Audio chunk callback requested stop";
+                    delivery_state.failed = true;
+                    return false;
+                }
+            }
+            ++delivery_state.chunk_index;
+            return true;
+        };
+
+        std::thread delivery_thread;
+        if (paced_delivery) {
+            delivery_thread = std::thread([&]() {
+                for (;;) {
+                    std::vector<float> chunk;
+                    bool is_final = false;
+                    int64_t wall_ms = 0;
+                    {
+                        std::unique_lock<std::mutex> lock(delivery_state.mutex);
+                        delivery_state.cv.wait_for(lock, std::chrono::milliseconds(5), [&]() {
+                            if (delivery_state.failed) {
+                                return true;
+                            }
+                            const size_t available = delivery_state.buffered.size() - delivery_state.emitted_samples;
+                            if (!delivery_state.playback_started) {
+                                return available >= delivery_start_buffer_samples || (delivery_state.finalized && available > 0);
+                            }
+                            if (delivery_state.finalized) {
+                                return available > 0;
+                            }
+                            if (available < delivery_chunk_samples) {
+                                return false;
+                            }
+                            if (delivery_state.first_emit_wall_ms < 0) {
+                                return true;
+                            }
+                            const int64_t elapsed_ms = std::max<int64_t>(0, get_time_ms() - delivery_state.first_emit_wall_ms);
+                            const size_t elapsed_samples = (size_t) (((int64_t) sample_rate * elapsed_ms) / 1000);
+                            const size_t allowed_samples = delivery_state.first_emit_samples + elapsed_samples + delivery_target_lead_samples;
+                            return delivery_state.emitted_samples < allowed_samples;
+                        });
+
+                        if (delivery_state.failed) {
+                            break;
+                        }
+
+                        const size_t available = delivery_state.buffered.size() - delivery_state.emitted_samples;
+                        if (available == 0 && delivery_state.finalized) {
+                            break;
+                        }
+                        if (available == 0) {
+                            continue;
+                        }
+
+                        size_t emit_count = 0;
+                        if (!delivery_state.playback_started) {
+                            emit_count = std::min(available, delivery_start_buffer_samples);
+                            delivery_state.playback_started = true;
+                            delivery_state.first_emit_samples = emit_count;
+                            delivery_state.first_emit_wall_ms = get_time_ms();
+                        } else if (delivery_state.finalized && available <= delivery_chunk_samples) {
+                            emit_count = available;
+                        } else if (available >= delivery_chunk_samples) {
+                            const int64_t elapsed_ms = std::max<int64_t>(0, get_time_ms() - delivery_state.first_emit_wall_ms);
+                            const size_t elapsed_samples = (size_t) (((int64_t) sample_rate * elapsed_ms) / 1000);
+                            const size_t allowed_samples = delivery_state.first_emit_samples + elapsed_samples + delivery_target_lead_samples;
+                            if (delivery_state.finalized || delivery_state.emitted_samples < allowed_samples) {
+                                emit_count = delivery_chunk_samples;
+                            }
+                        }
+
+                        if (emit_count == 0) {
+                            continue;
+                        }
+
+                        is_final = delivery_state.finalized && (delivery_state.emitted_samples + emit_count >= delivery_state.buffered.size());
+                        chunk.assign(delivery_state.buffered.begin() + (ptrdiff_t) delivery_state.emitted_samples,
+                                     delivery_state.buffered.begin() + (ptrdiff_t) (delivery_state.emitted_samples + emit_count));
+                        delivery_state.emitted_samples += emit_count;
+                        wall_ms = std::max<int64_t>(0, get_time_ms() - t_generate_start);
+                    }
+
+                    if (!emit_delivery_chunk(chunk.data(), chunk.size(), is_final, wall_ms)) {
+                        delivery_state.cv.notify_all();
+                        break;
+                    }
+                }
+            });
         }
 
         struct DecodeJob {
@@ -764,6 +1012,12 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             std::vector<float> decoded;
             const int64_t dequeue_ms = get_time_ms() - t_generate_start;
             const int64_t decode_start_ms = get_time_ms();
+            if (job.index == 0) {
+                fprintf(stderr, "[stream] first_decode_start wall_ms=%lld queued_ms=%lld local_frames=%d\n",
+                        (long long) decode_start_ms,
+                        (long long) job.queued_ms,
+                        job.local_frames);
+            }
             if (!self.audio_decoder_.decode(job.local_codes.data(), job.local_frames, decoded)) {
                 stream_error_msg = "Failed streaming decode: " + self.audio_decoder_.get_error();
                 stream_error.store(true);
@@ -778,6 +1032,19 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                 first_pcm_ready_ms = get_time_ms() - t_generate_start;
                 first_audio_ready_ms = first_pcm_ready_ms;
             }
+            const int64_t window_ready_ms = get_time_ms() - t_generate_start;
+            const int64_t window_gap_ms = prev_window_ready_ms >= 0 ? (window_ready_ms - prev_window_ready_ms) : window_ready_ms;
+            if (first_window_ready_ms < 0) {
+                first_window_ready_ms = window_ready_ms;
+            }
+            if (prev_window_ready_ms >= 0) {
+                if (second_window_gap_ms < 0) {
+                    second_window_gap_ms = window_gap_ms;
+                }
+                if (window_gap_ms > max_window_gap_ms) {
+                    max_window_gap_ms = window_gap_ms;
+                }
+            }
 
             const int32_t dropped_context_frames = job.new_start - job.ctx_start;
             const size_t drop_samples = std::min(decoded.size(),
@@ -786,6 +1053,9 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             const size_t append_offset = result.audio.size();
             result.audio.insert(result.audio.end(), decoded.begin() + (ptrdiff_t) drop_samples, decoded.end());
             const size_t total_samples = result.audio.size();
+            emitted_audio_samples.store((int64_t) total_samples);
+            const double audio_ms = qwen3_samples_to_ms(appended_samples, sample_rate);
+            const double cumulative_audio_ms = qwen3_samples_to_ms(total_samples, sample_rate);
             if (first_playable_50ms_ready_ms < 0 && total_samples >= playable_50ms_samples) {
                 first_playable_50ms_ready_ms = get_time_ms() - t_generate_start;
             }
@@ -795,14 +1065,37 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             if (first_playable_200ms_ready_ms < 0 && total_samples >= playable_200ms_samples) {
                 first_playable_200ms_ready_ms = get_time_ms() - t_generate_start;
             }
+            if (paced_delivery && appended_samples > 0) {
+                {
+                    std::lock_guard<std::mutex> lock(delivery_state.mutex);
+                    delivery_state.buffered.insert(delivery_state.buffered.end(),
+                                                  decoded.begin() + (ptrdiff_t) drop_samples,
+                                                  decoded.end());
+                }
+                delivery_state.cv.notify_one();
+            }
             if (live_player && appended_samples > 0) {
                 if (first_playback_enqueue_ms < 0) {
                     first_playback_enqueue_ms = get_time_ms() - t_generate_start;
                 }
+                fprintf(stderr,
+                        "[stream] player_write window_index=%d samples=%zu audio_ms=%.1f wall_ms_since_request=%lld wall_ms_since_prev_window=%lld cumulative_audio_ms=%.1f player_queued_audio_ms(before)=%.1f\n",
+                        job.index,
+                        appended_samples,
+                        audio_ms,
+                        (long long) window_ready_ms,
+                        (long long) window_gap_ms,
+                        cumulative_audio_ms,
+                        live_player->queued_audio_ms());
                 if (!live_player->write(result.audio, append_offset, appended_samples)) {
                     fprintf(stderr, "Warning: live streaming playback write failed: %s\n",
                             live_player->last_error().c_str());
                     live_player.reset();
+                } else {
+                    fprintf(stderr,
+                            "[stream] player_queue_after_write window_index=%d player_queued_audio_ms=%.1f\n",
+                            job.index,
+                            live_player->queued_audio_ms());
                 }
             }
 
@@ -826,7 +1119,17 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                             result.sample_rate > 0 ? (1000.0 * (double) result.audio.size() / (double) result.sample_rate) : 0.0);
                 }
             }
+            fprintf(stderr,
+                    "[stream] window_available window_index=%d samples=%zu audio_ms=%.1f wall_ms_since_request=%lld wall_ms_since_prev_window=%lld cumulative_audio_ms=%.1f player_queued_audio_ms=%.1f\n",
+                    job.index,
+                    appended_samples,
+                    audio_ms,
+                    (long long) window_ready_ms,
+                    (long long) window_gap_ms,
+                    cumulative_audio_ms,
+                    live_player ? live_player->queued_audio_ms() : 0.0);
 
+            prev_window_ready_ms = window_ready_ms;
             last_completed_frame = job.end_frame;
             return true;
         };
@@ -836,6 +1139,46 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
         std::deque<DecodeJob> decode_queue;
         bool producer_done = false;
         std::thread decode_thread;
+
+        auto estimated_player_queued_audio_ms = [&]() -> double {
+            if (live_player) {
+                return live_player->queued_audio_ms();
+            }
+            const double emitted_ms = qwen3_samples_to_ms((size_t) std::max<int64_t>(0, emitted_audio_samples.load()), sample_rate);
+            const double elapsed_ms = (double) std::max<int64_t>(0, get_time_ms() - t_generate_start);
+            return std::max(0.0, emitted_ms - elapsed_ms);
+        };
+
+        auto select_steady_window_frames = [&]() -> int32_t {
+            if (!adaptive_windows || steady_window <= adaptive_min_window) {
+                last_selected_tail_window.store(steady_window);
+                return steady_window;
+            }
+
+            const double queued_audio_ms = estimated_player_queued_audio_ms();
+            int32_t selected = steady_window;
+            if (queued_audio_ms <= (double) adaptive_low_watermark_ms) {
+                selected = adaptive_min_window;
+            } else if (queued_audio_ms < (double) adaptive_high_watermark_ms) {
+                const double span_ms = (double) std::max(1, adaptive_high_watermark_ms - adaptive_low_watermark_ms);
+                const double normalized = (queued_audio_ms - (double) adaptive_low_watermark_ms) / span_ms;
+                const double scaled = (double) adaptive_min_window + normalized * (double) (steady_window - adaptive_min_window);
+                selected = clamp_window_frames((int32_t) (scaled + 0.5), adaptive_min_window, steady_window);
+            }
+
+            last_selected_tail_window.store(selected);
+            return selected;
+        };
+
+        int32_t ramp_windows_remaining = ramp_window_count;
+        auto select_next_tail_window_frames = [&]() -> int32_t {
+            if (ramp_windows_remaining > 0) {
+                --ramp_windows_remaining;
+                last_selected_tail_window.store(ramp_window);
+                return ramp_window;
+            }
+            return select_steady_window_frames();
+        };
 
         auto enqueue_tail_window = [&](const std::vector<int32_t> & all_codes, int32_t end_frame, bool is_final) -> bool {
             if (end_frame <= last_enqueued_frame) {
@@ -915,6 +1258,20 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                     decode_thread.join();
                 }
             }
+            if (paced_delivery) {
+                {
+                    std::lock_guard<std::mutex> lock(delivery_state.mutex);
+                    delivery_state.finalized = true;
+                }
+                delivery_state.cv.notify_all();
+                if (delivery_thread.joinable()) {
+                    delivery_thread.join();
+                }
+                if (delivery_state.failed) {
+                    stream_error_msg = delivery_state.error_msg.empty() ? "Paced delivery failed" : delivery_state.error_msg;
+                    stream_error.store(true);
+                }
+            }
             if (live_player) {
                 const int64_t live_drain_start = get_time_ms();
                 live_player->drain();
@@ -937,14 +1294,14 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                 if (!enqueue_tail_window(all_codes, first_window, false)) {
                     return false;
                 }
-                next_decode_end = first_window + steady_window;
+                next_decode_end = first_window + select_next_tail_window_frames();
             }
 
             while (frames_available >= next_decode_end) {
                 if (!enqueue_tail_window(all_codes, next_decode_end, false)) {
                     return false;
                 }
-                next_decode_end += steady_window;
+                next_decode_end += select_next_tail_window_frames();
             }
             return true;
         };
@@ -955,6 +1312,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
         // latency base immediately before the real autoregressive generation begins
         // so first-window queue/PCM/playback numbers measure the actual hot path.
         t_generate_start = get_time_ms();
+        fprintf(stderr, "[stream] hot_request_start wall_ms=0\n");
         if (live_player) {
             live_player->reset_timing_base(t_generate_start);
         }
@@ -1000,6 +1358,11 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                 const int64_t first_submit = live_player->first_submit_ms();
                 fprintf(stderr, "  first playback enqueue:      %lld ms\n", (long long) first_playback_enqueue_ms);
                 fprintf(stderr, "  first playback submit:       %lld ms\n", (long long) first_submit);
+                fprintf(stderr, "  queued audio at start:       %.1f ms\n", live_player->queued_audio_at_first_submit_ms());
+                fprintf(stderr, "  underruns/starvations:       %d\n", live_player->starvation_events());
+                if (live_player->first_starvation_ms() >= 0) {
+                    fprintf(stderr, "  first starvation:            %lld ms\n", (long long) live_player->first_starvation_ms());
+                }
                 if (params.live_preroll_ms > 0) {
                     fprintf(stderr, "  live playback preroll:       %d ms\n", params.live_preroll_ms);
                 }
@@ -1019,9 +1382,22 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             }
             fprintf(stderr, "  streaming decode total:      %lld ms\n", (long long) streaming_decode_ms);
             fprintf(stderr, "  generated audio samples:     %zu\n", result.audio.size());
+            fprintf(stderr, "  last tail window size:       %d frames\n", last_selected_tail_window.load());
             if (live_playback_wait_ms > 0) {
                 fprintf(stderr, "  live playback drain wait:    %lld ms (excluded from synthesis timing)\n",
                         (long long) live_playback_wait_ms);
+            }
+            fprintf(stderr, "\nStreaming cadence table:\n");
+            fprintf(stderr, "  first playable ms:           %lld\n", (long long) first_playable_150ms_ready_ms);
+            fprintf(stderr, "  first window ms:             %lld\n", (long long) first_window_ready_ms);
+            fprintf(stderr, "  second window gap ms:        %lld\n", (long long) second_window_gap_ms);
+            fprintf(stderr, "  max window gap ms:           %lld\n", (long long) max_window_gap_ms);
+            if (live_player) {
+                fprintf(stderr, "  queued audio at playback:    %.1f ms\n", live_player->queued_audio_at_first_submit_ms());
+                fprintf(stderr, "  underruns:                   %d\n", live_player->starvation_events());
+            } else {
+                fprintf(stderr, "  queued audio at playback:    0.0 ms\n");
+                fprintf(stderr, "  underruns:                   0\n");
             }
         }
 
@@ -1128,6 +1504,11 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
         fprintf(stderr, "  Phys peak:       %s\n",
                 format_bytes(result.mem_phys_peak_bytes).c_str());
     }
+
+    fprintf(stderr, "[stream] synthesis_completed wall_ms=%lld success=%s audio_ms=%.1f\n",
+            (long long) result.t_total_ms,
+            result.success ? "yes" : "no",
+            qwen3_samples_to_ms(result.audio.size(), result.sample_rate));
 
     return result;
 }

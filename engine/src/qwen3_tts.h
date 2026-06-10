@@ -55,9 +55,14 @@ struct tts_params {
     // Produces a WAV-compatible output buffer, but decode is still single-threaded
     // and blocks generation inside the frame callback.
     bool streaming_generate = true;
-    int32_t first_tail_window_frames = 1;
-    int32_t steady_tail_window_frames = 12;
-    int32_t context_frames = 4;
+    int32_t first_tail_window_frames = 3;
+    // After the first window, optionally use a few smaller ramp windows before
+    // settling into the steady-state size. This reduces early burstiness while
+    // preserving the larger hot-path decode shape for throughput.
+    int32_t ramp_tail_window_frames = 6;
+    int32_t ramp_tail_window_count = 0;
+    int32_t steady_tail_window_frames = 8;
+    int32_t context_frames = 3;
     // Optional larger context for the final streaming window. A short steady-state
     // context is good for latency, but the last acoustic tail can need more left
     // context to avoid sounding clipped/truncated. <=0 means use context_frames.
@@ -93,11 +98,26 @@ struct tts_params {
     // Windows live playback only: buffer this many milliseconds before the first
     // waveOutWrite. This is a playback safety cushion only; it does not alter
     // WAV assembly or synthesis timing. A value of 0 preserves immediate playback.
-    int32_t live_preroll_ms = 0;
+    int32_t live_preroll_ms = 150;
+
+    // Adaptive streaming: shrink steady-state decode windows when queued audio
+    // is running low, then expand again once playback headroom recovers.
+    bool adaptive_steady_windows = false;
+    int32_t adaptive_min_tail_window_frames = 4;
+    int32_t adaptive_low_watermark_ms = 250;
+    int32_t adaptive_high_watermark_ms = 900;
 
     // Diagnostic: print per-window streaming queue/decode timing so we can verify
     // whether generation is actually overlapping vocoder decode.
     bool dump_streaming_overlap = false;
+
+    // Optional paced delivery: keep coarse decode windows for throughput, but
+    // emit smaller audio chunks to downstream consumers and live playback.
+    bool paced_audio_delivery = false;
+    int32_t delivery_chunk_ms = 80;
+    int32_t delivery_start_buffer_ms = 150;
+    int32_t delivery_target_lead_ms = 500;
+    std::function<bool(const float * samples, int32_t n_samples, int32_t sample_rate, bool is_final)> audio_chunk_callback;
 };
 
 // TTS generation result

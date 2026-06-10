@@ -68,16 +68,21 @@ void print_usage(const char * program) {
     fprintf(stderr, "  -j, --threads <n>      Number of threads (default: 4)\n");
     fprintf(stderr, "  --batch                Disable streaming defaults and write full batch WAV only\n");
     fprintf(stderr, "  --streaming-generate  Enable interleaved generation + tail-context decode (default on)\n");
-    fprintf(stderr, "  --first-tail-window-frames <n> First streaming decode size (default: 1)\n");
-    fprintf(stderr, "  --steady-tail-window-frames <n> Steady streaming decode step (default: 12)\n");
+    fprintf(stderr, "  --first-tail-window-frames <n> First streaming decode size (default: 3)\n");
+    fprintf(stderr, "  --steady-tail-window-frames <n> Steady streaming decode step (default: 8)\n");
     fprintf(stderr, "  --context-frames <n> Tail-context frames for streaming decode (default: 4)\n");
     fprintf(stderr, "  --final-context-frames <n> Larger context for final streaming flush (default: 4)\n");
+    fprintf(stderr, "  --adaptive-steady-windows Enable queue-aware steady window sizing (default off)\n");
+    fprintf(stderr, "  --no-adaptive-steady-windows Disable queue-aware steady window sizing\n");
+    fprintf(stderr, "  --adaptive-min-tail-window-frames <n> Smallest steady window when queue runs low (default: 4)\n");
+    fprintf(stderr, "  --adaptive-low-watermark-ms <ms> Queue depth that triggers smaller windows (default: 250)\n");
+    fprintf(stderr, "  --adaptive-high-watermark-ms <ms> Queue depth that restores full windows (default: 900)\n");
     fprintf(stderr, "  --safe-final-tail      Use 16-frame final context to reduce end truncation\n");
     fprintf(stderr, "  --async-streaming-decode Decode streaming vocoder windows on a worker thread (default on)\n");
     fprintf(stderr, "  --no-async-streaming-decode Disable async streaming decode\n");
     fprintf(stderr, "  --play-streaming       Play streaming chunks live while also writing WAV (default on)\n");
     fprintf(stderr, "  --no-play-streaming    Disable live playback while keeping streaming WAV output\n");
-    fprintf(stderr, "  --live-preroll-ms <ms> Buffer live PCM before first playback submit (default: 0)\n");
+    fprintf(stderr, "  --live-preroll-ms <ms> Buffer live PCM before first playback submit (default: 150)\n");
     fprintf(stderr, "  --prewarm-streaming    Warm transformer/decoder before timed streaming synthesis (default on)\n");
     fprintf(stderr, "  --no-prewarm-streaming Disable streaming warmup\n");
     fprintf(stderr, "  --prewarm-frames <n>   Number of frames for transformer prewarm (default: 1)\n");
@@ -245,6 +250,18 @@ int main(int argc, char ** argv) {
                 return 1;
             }
             params.first_tail_window_frames = std::stoi(args[i]);
+        } else if (arg == "--ramp-tail-window-frames") {
+            if (++i >= (int) args.size()) {
+                fprintf(stderr, "Error: missing ramp-tail-window-frames value\n");
+                return 1;
+            }
+            params.ramp_tail_window_frames = std::stoi(args[i]);
+        } else if (arg == "--ramp-tail-window-count") {
+            if (++i >= (int) args.size()) {
+                fprintf(stderr, "Error: missing ramp-tail-window-count value\n");
+                return 1;
+            }
+            params.ramp_tail_window_count = std::stoi(args[i]);
         } else if (arg == "--steady-tail-window-frames") {
             if (++i >= (int) args.size()) {
                 fprintf(stderr, "Error: missing steady-tail-window-frames value\n");
@@ -263,6 +280,50 @@ int main(int argc, char ** argv) {
                 return 1;
             }
             params.final_context_frames = std::stoi(args[i]);
+        } else if (arg == "--adaptive-steady-windows") {
+            params.adaptive_steady_windows = true;
+        } else if (arg == "--no-adaptive-steady-windows") {
+            params.adaptive_steady_windows = false;
+        } else if (arg == "--adaptive-min-tail-window-frames") {
+            if (++i >= (int) args.size()) {
+                fprintf(stderr, "Error: missing adaptive-min-tail-window-frames value\n");
+                return 1;
+            }
+            params.adaptive_min_tail_window_frames = std::stoi(args[i]);
+        } else if (arg == "--adaptive-low-watermark-ms") {
+            if (++i >= (int) args.size()) {
+                fprintf(stderr, "Error: missing adaptive-low-watermark-ms value\n");
+                return 1;
+            }
+            params.adaptive_low_watermark_ms = std::stoi(args[i]);
+        } else if (arg == "--adaptive-high-watermark-ms") {
+            if (++i >= (int) args.size()) {
+                fprintf(stderr, "Error: missing adaptive-high-watermark-ms value\n");
+                return 1;
+            }
+            params.adaptive_high_watermark_ms = std::stoi(args[i]);
+        } else if (arg == "--paced-audio-delivery") {
+            params.paced_audio_delivery = true;
+        } else if (arg == "--no-paced-audio-delivery") {
+            params.paced_audio_delivery = false;
+        } else if (arg == "--delivery-chunk-ms") {
+            if (++i >= (int) args.size()) {
+                fprintf(stderr, "Error: missing delivery-chunk-ms value\n");
+                return 1;
+            }
+            params.delivery_chunk_ms = std::stoi(args[i]);
+        } else if (arg == "--delivery-start-buffer-ms") {
+            if (++i >= (int) args.size()) {
+                fprintf(stderr, "Error: missing delivery-start-buffer-ms value\n");
+                return 1;
+            }
+            params.delivery_start_buffer_ms = std::stoi(args[i]);
+        } else if (arg == "--delivery-target-lead-ms") {
+            if (++i >= (int) args.size()) {
+                fprintf(stderr, "Error: missing delivery-target-lead-ms value\n");
+                return 1;
+            }
+            params.delivery_target_lead_ms = std::stoi(args[i]);
         } else if (arg == "--async-streaming-decode") {
             params.async_streaming_decode = true;
         } else if (arg == "--no-async-streaming-decode") {
