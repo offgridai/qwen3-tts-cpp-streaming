@@ -1011,6 +1011,8 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             bool playback_started = false;
             int64_t first_emit_clock_ms = -1;
             int64_t first_emit_wall_ms = -1;
+            int64_t next_emit_due_ms = -1;
+            int64_t previous_emit_clock_ms = -1;
             int64_t previous_emit_wall_ms = -1;
             int64_t second_emit_gap_ms = -1;
             int64_t max_emit_gap_ms = -1;
@@ -1032,6 +1034,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                     delivery_state.max_emit_gap_ms = chunk_gap_ms;
                 }
             }
+            delivery_state.previous_emit_clock_ms = t_generate_start + wall_ms;
             delivery_state.previous_emit_wall_ms = wall_ms;
             if (params.audio_chunk_callback) {
                 fprintf(stderr,
@@ -1081,6 +1084,12 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
 
         std::thread delivery_thread;
         if (paced_delivery) {
+            const int64_t delivery_chunk_interval_ms = std::max<int64_t>(
+                1,
+                (int64_t) std::llround(qwen3_samples_to_ms(delivery_chunk_samples, sample_rate)));
+            const int64_t callback_burst_gap_ms = callback_driven_delivery
+                ? std::max<int64_t>(10, delivery_chunk_interval_ms / 4)
+                : delivery_chunk_interval_ms;
             delivery_thread = std::thread([&]() {
                 for (;;) {
                     std::vector<float> chunk;
@@ -1088,28 +1097,106 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                     int64_t wall_ms = 0;
                     {
                         std::unique_lock<std::mutex> lock(delivery_state.mutex);
-                        delivery_state.cv.wait_for(lock, std::chrono::milliseconds(5), [&]() {
+                        size_t emit_count = 0;
+                        for (;;) {
                             if (delivery_state.failed) {
-                                return true;
+                                break;
                             }
+
                             const size_t available = delivery_state.buffered.size() - delivery_state.emitted_samples;
+                            if (available == 0) {
+                                if (delivery_state.finalized) {
+                                    break;
+                                }
+                                delivery_state.cv.wait_for(lock, std::chrono::milliseconds(5));
+                                continue;
+                            }
+
+                            const int64_t now_ms = get_time_ms();
                             if (!delivery_state.playback_started) {
-                                return available >= effective_delivery_start_buffer_samples || (delivery_state.finalized && available > 0);
+                                if (!delivery_state.finalized && available < effective_delivery_start_buffer_samples) {
+                                    delivery_state.cv.wait_for(lock, std::chrono::milliseconds(5));
+                                    continue;
+                                }
+
+                                emit_count = std::min(available, delivery_chunk_samples);
+                                delivery_state.playback_started = true;
+                                delivery_state.first_emit_samples = emit_count;
+                                delivery_state.first_emit_clock_ms = now_ms;
+                                delivery_state.next_emit_due_ms = now_ms + delivery_chunk_interval_ms;
+                                break;
                             }
-                            if (delivery_state.finalized) {
-                                return available > 0;
+
+                            if (callback_driven_delivery) {
+                                if (delivery_state.finalized && available <= delivery_chunk_samples) {
+                                    emit_count = available;
+                                    break;
+                                }
+
+                                if (available < delivery_chunk_samples) {
+                                    if (delivery_state.finalized) {
+                                        emit_count = available;
+                                        break;
+                                    }
+                                    delivery_state.cv.wait_for(lock, std::chrono::milliseconds(5));
+                                    continue;
+                                }
+
+                                const int64_t elapsed_ms = std::max<int64_t>(0, now_ms - delivery_state.first_emit_clock_ms);
+                                const size_t elapsed_samples = (size_t) (((int64_t) sample_rate * elapsed_ms) / 1000);
+                                const size_t emitted_ahead_samples = delivery_state.emitted_samples > elapsed_samples
+                                    ? (delivery_state.emitted_samples - elapsed_samples)
+                                    : 0;
+                                const size_t post_emit_ahead_samples = emitted_ahead_samples + delivery_chunk_samples;
+                                const int64_t burst_due_ms = delivery_state.previous_emit_clock_ms >= 0
+                                    ? (delivery_state.previous_emit_clock_ms + callback_burst_gap_ms)
+                                    : now_ms;
+                                const bool can_burst_to_target =
+                                    post_emit_ahead_samples <= delivery_target_lead_samples &&
+                                    now_ms >= burst_due_ms;
+
+                                if (can_burst_to_target) {
+                                    emit_count = delivery_chunk_samples;
+                                    delivery_state.next_emit_due_ms = std::max<int64_t>(
+                                        delivery_state.next_emit_due_ms,
+                                        now_ms + callback_burst_gap_ms);
+                                    break;
+                                }
+
+                                if (delivery_state.next_emit_due_ms > now_ms) {
+                                    const int64_t wait_until_ms = std::min(delivery_state.next_emit_due_ms, burst_due_ms);
+                                    delivery_state.cv.wait_for(lock, std::chrono::milliseconds(
+                                        std::max<int64_t>(1, wait_until_ms - now_ms)));
+                                    continue;
+                                }
+
+                                emit_count = delivery_chunk_samples;
+                                delivery_state.next_emit_due_ms = std::max<int64_t>(
+                                    delivery_state.next_emit_due_ms + delivery_chunk_interval_ms,
+                                    now_ms + delivery_chunk_interval_ms);
+                                break;
                             }
+
+                            if (delivery_state.finalized && available <= delivery_chunk_samples) {
+                                emit_count = available;
+                                break;
+                            }
+
                             if (available < delivery_chunk_samples) {
-                                return false;
+                                delivery_state.cv.wait_for(lock, std::chrono::milliseconds(5));
+                                continue;
                             }
-                            if (delivery_state.first_emit_clock_ms < 0) {
-                                return true;
-                            }
-                            const int64_t elapsed_ms = std::max<int64_t>(0, get_time_ms() - delivery_state.first_emit_clock_ms);
+
+                            const int64_t elapsed_ms = std::max<int64_t>(0, now_ms - delivery_state.first_emit_clock_ms);
                             const size_t elapsed_samples = (size_t) (((int64_t) sample_rate * elapsed_ms) / 1000);
                             const size_t allowed_samples = delivery_state.first_emit_samples + elapsed_samples + delivery_target_lead_samples;
-                            return delivery_state.emitted_samples < allowed_samples;
-                        });
+                            if (delivery_state.finalized || delivery_state.emitted_samples < allowed_samples) {
+                                emit_count = delivery_chunk_samples;
+                                break;
+                            }
+
+                            delivery_state.cv.wait_for(lock, std::chrono::milliseconds(5));
+                        }
 
                         if (delivery_state.failed) {
                             break;
@@ -1118,26 +1205,6 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                         const size_t available = delivery_state.buffered.size() - delivery_state.emitted_samples;
                         if (available == 0 && delivery_state.finalized) {
                             break;
-                        }
-                        if (available == 0) {
-                            continue;
-                        }
-
-                        size_t emit_count = 0;
-                        if (!delivery_state.playback_started) {
-                            emit_count = std::min(available, effective_delivery_start_buffer_samples);
-                            delivery_state.playback_started = true;
-                            delivery_state.first_emit_samples = emit_count;
-                            delivery_state.first_emit_clock_ms = get_time_ms();
-                        } else if (delivery_state.finalized && available <= delivery_chunk_samples) {
-                            emit_count = available;
-                        } else if (available >= delivery_chunk_samples) {
-                            const int64_t elapsed_ms = std::max<int64_t>(0, get_time_ms() - delivery_state.first_emit_clock_ms);
-                            const size_t elapsed_samples = (size_t) (((int64_t) sample_rate * elapsed_ms) / 1000);
-                            const size_t allowed_samples = delivery_state.first_emit_samples + elapsed_samples + delivery_target_lead_samples;
-                            if (delivery_state.finalized || delivery_state.emitted_samples < allowed_samples) {
-                                emit_count = delivery_chunk_samples;
-                            }
                         }
 
                         if (emit_count == 0) {
