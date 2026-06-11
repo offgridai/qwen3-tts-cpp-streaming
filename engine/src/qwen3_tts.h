@@ -117,10 +117,12 @@ struct tts_params {
 
     // Optional paced delivery: keep coarse decode windows for throughput, but
     // emit smaller audio chunks to downstream consumers and live playback.
-    bool paced_audio_delivery = false;
-    int32_t delivery_chunk_ms = 80;
+    bool paced_audio_delivery = true;
+    int32_t delivery_chunk_ms = 40;
     int32_t delivery_start_buffer_ms = 150;
-    int32_t delivery_target_lead_ms = 500;
+    int32_t delivery_target_lead_ms = 0;
+    bool paced_live_playback = false;
+    int32_t steady_split_decode_frames = 0;
     std::function<bool(const float * samples, int32_t n_samples, int32_t sample_rate, bool is_final)> audio_chunk_callback;
 };
 

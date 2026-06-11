@@ -136,6 +136,8 @@ bool Qwen3StreamingTts::synthesize_streaming(
     params.delivery_chunk_ms = options.delivery_chunk_ms;
     params.delivery_start_buffer_ms = options.delivery_start_buffer_ms;
     params.delivery_target_lead_ms = options.delivery_target_lead_ms;
+    params.paced_live_playback = options.paced_live_playback;
+    params.steady_split_decode_frames = options.steady_split_decode_frames;
     params.dump_first_frame_profile = options.dump_first_frame_profile;
     params.dump_streaming_overlap = options.dump_streaming_overlap;
     if (on_chunk) {
