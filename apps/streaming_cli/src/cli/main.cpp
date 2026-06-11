@@ -95,6 +95,9 @@ int main(int argc, char** argv) {
         else if (a == "--delivery-chunk-ms") options.delivery_chunk_ms = std::stoi(next());
         else if (a == "--delivery-start-buffer-ms") options.delivery_start_buffer_ms = std::stoi(next());
         else if (a == "--delivery-target-lead-ms") options.delivery_target_lead_ms = std::stoi(next());
+        else if (a == "--paced-live-playback") options.paced_live_playback = true;
+        else if (a == "--no-paced-live-playback") options.paced_live_playback = false;
+        else if (a == "--steady-split-decode-frames") options.steady_split_decode_frames = std::stoi(next());
         else if (a == "--simulate-stream-callback") simulate_stream_callback = true;
         else if (a == "-h" || a == "--help") {
             std::cout << "Usage: qwen3_streaming_cli -m models --model-identifier qwen3-tts-0.6b-f16 --speaker-embedding speaker.json -t text -o out.wav\n"
@@ -120,6 +123,8 @@ int main(int argc, char** argv) {
                       << "  --delivery-chunk-ms <ms>\n"
                       << "  --delivery-start-buffer-ms <ms>\n"
                       << "  --delivery-target-lead-ms <ms>\n"
+                      << "  --paced-live-playback | --no-paced-live-playback\n"
+                      << "  --steady-split-decode-frames <n>\n"
                       << "  --simulate-stream-callback\n"
                       << "  --dump-streaming-overlap\n"
                       << "\n"

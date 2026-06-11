@@ -36,10 +36,12 @@ struct TtsStreamOptions {
     int32_t adaptive_min_tail_window_frames = 4;
     int32_t adaptive_low_watermark_ms = 250;
     int32_t adaptive_high_watermark_ms = 900;
-    bool paced_audio_delivery = false;
-    int32_t delivery_chunk_ms = 80;
+    bool paced_audio_delivery = true;
+    int32_t delivery_chunk_ms = 40;
     int32_t delivery_start_buffer_ms = 150;
-    int32_t delivery_target_lead_ms = 500;
+    int32_t delivery_target_lead_ms = 0;
+    bool paced_live_playback = false;
+    int32_t steady_split_decode_frames = 0;
 };
 
 using TtsChunkCallback = std::function<void(const TtsStreamChunk&)>;

@@ -77,6 +77,14 @@ void print_usage(const char * program) {
     fprintf(stderr, "  --adaptive-min-tail-window-frames <n> Smallest steady window when queue runs low (default: 4)\n");
     fprintf(stderr, "  --adaptive-low-watermark-ms <ms> Queue depth that triggers smaller windows (default: 250)\n");
     fprintf(stderr, "  --adaptive-high-watermark-ms <ms> Queue depth that restores full windows (default: 900)\n");
+    fprintf(stderr, "  --paced-audio-delivery Emit smaller paced PCM chunks from an internal buffer (default on)\n");
+    fprintf(stderr, "  --no-paced-audio-delivery Disable paced PCM emission\n");
+    fprintf(stderr, "  --delivery-chunk-ms <ms> Paced PCM chunk size (default: 40)\n");
+    fprintf(stderr, "  --delivery-start-buffer-ms <ms> Paced buffer before first emit (default: 150)\n");
+    fprintf(stderr, "  --delivery-target-lead-ms <ms> Extra paced lead to tolerate bursty decode (default: 0)\n");
+    fprintf(stderr, "  --paced-live-playback Route live playback through the paced emitter too (default off)\n");
+    fprintf(stderr, "  --no-paced-live-playback Leave live playback on raw window writes even when paced delivery is on\n");
+    fprintf(stderr, "  --steady-split-decode-frames <n> Split later non-final windows into smaller decode jobs after queueing\n");
     fprintf(stderr, "  --safe-final-tail      Use 16-frame final context to reduce end truncation\n");
     fprintf(stderr, "  --async-streaming-decode Decode streaming vocoder windows on a worker thread (default on)\n");
     fprintf(stderr, "  --no-async-streaming-decode Disable async streaming decode\n");
@@ -336,6 +344,16 @@ int main(int argc, char ** argv) {
                 return 1;
             }
             params.delivery_target_lead_ms = std::stoi(args[i]);
+        } else if (arg == "--paced-live-playback") {
+            params.paced_live_playback = true;
+        } else if (arg == "--no-paced-live-playback") {
+            params.paced_live_playback = false;
+        } else if (arg == "--steady-split-decode-frames") {
+            if (++i >= (int) args.size()) {
+                fprintf(stderr, "Error: missing steady-split-decode-frames value\n");
+                return 1;
+            }
+            params.steady_split_decode_frames = std::stoi(args[i]);
         } else if (arg == "--async-streaming-decode") {
             params.async_streaming_decode = true;
         } else if (arg == "--no-async-streaming-decode") {
