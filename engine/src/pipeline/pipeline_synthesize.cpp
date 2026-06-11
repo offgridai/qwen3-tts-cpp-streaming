@@ -948,9 +948,12 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
         }
         const bool paced_live_playback = params.paced_audio_delivery && params.paced_live_playback && (bool) live_player;
         const bool paced_delivery = params.paced_audio_delivery && ((bool) params.audio_chunk_callback || paced_live_playback);
+        const bool callback_driven_delivery = (bool) params.audio_chunk_callback && !paced_live_playback;
         const size_t effective_delivery_start_buffer_samples =
             paced_live_playback ? std::max(delivery_start_buffer_samples, live_preroll_samples)
-                                : delivery_start_buffer_samples;
+                                : (callback_driven_delivery
+                                    ? std::min(delivery_start_buffer_samples, delivery_chunk_samples)
+                                    : delivery_start_buffer_samples);
 
         if (params.print_progress) {
             fprintf(stderr,

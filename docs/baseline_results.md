@@ -1,69 +1,81 @@
 # Baseline Results
 
-## Streaming Configuration
+## Current Streaming Defaults
 
-Known-good streaming configuration:
+Current low-latency / less-bursty defaults:
 
-- top-k: `75`
-- temperature: `0.9`
-- top-p: `1.0`
-- first_tail_window_frames: `1`
-- steady_tail_window_frames: `12`
-- context_frames: `4`
-- final_context_frames: `4`
-- async streaming decode: enabled
-- streaming prewarm: enabled
-- live playback worker: enabled
-- output format: mono `24 kHz` PCM16
+- `first_tail_window_frames=3`
+- `ramp_tail_window_frames=5`
+- `ramp_tail_window_count=2`
+- `steady_tail_window_frames=8`
+- `context_frames=3`
+- `early_context_frames=2`
+- `early_context_window_count=2`
+- `final_context_frames=4`
+- `adaptive_steady_windows=on`
+- `adaptive_min_tail_window_frames=6`
+- `adaptive_low_watermark_ms=220`
+- `adaptive_high_watermark_ms=520`
+- `paced_audio_delivery=on`
+- `delivery_chunk_ms=80`
+- `delivery_start_buffer_ms=80`
+- `delivery_target_lead_ms=240`
+- `async_streaming_decode=on`
+- `prewarm_streaming=on`
 
-## Latency Baseline
+These defaults are tuned for callback-driven consumers such as Offgrid-style clients, where earlier usable audio and steadier delivery matter more than peak batch efficiency.
 
-Observed low-latency startup behavior:
+## What Changed
 
-- first window queued: about `36-47 ms`
-- first tail decode: about `126-136 ms`
-- first PCM ready: about `169-175 ms`
+Earlier streaming settings optimized well for the standalone player, but still produced larger decode bursts for external consumers.
 
-This is the most important "feels responsive" metric for streaming playback.
+The current defaults keep:
 
-## Timing Interpretation
+- the same `3`-frame first window
+- smaller early ramp windows
+- reduced early left-context
+- adaptive steady-state windows
+- a paced emitter with a non-zero lead target
 
-The reported `Total` timing now excludes streaming prewarm.
+The qwen-side paced callback path also no longer waits on an unnecessarily large startup buffer when it is feeding an external callback instead of qwen's own paced live player.
 
-Earlier measurements overstated end-to-end wall time because:
+## Verified Comparison
 
-- `Code generation` excluded prewarm
-- `Vocoder decode` excluded prewarm
-- `Total` still included prewarm
+Representative callback-mode VoiceDesign run on `qwen3-tts-1.7b-voicedesign-f16`:
 
-That accounting bug is fixed. Realtime judgments should now be based on the corrected `Total` and `Throughput` lines.
+### New defaults
 
-## Recent Verified Results
+- first paced chunk: `314 ms`
+- first playback submit: `702 ms`
+- second window gap: `387 ms`
+- max window gap: `532 ms`
+- throughput: `1.03x realtime`
 
-### `qwen3-tts-0.6b-f16`
+### Old-style control
 
-Representative streaming runs:
+- first paced chunk: `312 ms`
+- first playback submit: `867 ms`
+- second window gap: `555 ms`
+- max window gap: `555 ms`
+- throughput: `1.07x realtime`
 
-- first PCM ready: `169-173 ms`
-- throughput: about `1.13x-1.22x realtime`
-- `50 ms` live preroll starts playback on the first chunk
-- `150 ms` live preroll typically delays first submit until the second chunk
+## Interpretation
 
-### `qwen3-tts-1.7b-voicedesign-f16`
+The retained improvements are:
 
-Representative streaming run:
+- startup remains essentially unchanged for first useful PCM
+- downstream consumers can begin playback materially sooner
+- the first major inter-window gap is smaller
+- paced delivery becomes friendlier to clients that manage their own playback buffer
 
-- `n_instruct=21`
-- first PCM ready: `173 ms`
-- streaming decode total: `2411 ms`
-- total hot-path time: `2729 ms`
-- audio duration: `3.18 s`
-- throughput: `1.16x realtime`
+The tradeoff is a small reduction in peak throughput, but the tested path remained faster than realtime.
 
 ## Practical Guidance
 
-- For low-latency interactive runtime speech, the `0.6B` path remains the best default.
-- VoiceDesign is now viable for direct streaming use, but it is heavier and better suited to persona creation or lower-frequency use.
-- A strong production pattern is:
-  1. use VoiceDesign once to create a target voice
-  2. switch to a faster clone/custom path for repeated lines
+- For interactive runtime speech, judge success from:
+  - first usable chunk time
+  - first safe playback time
+  - second-window gap
+  - max window gap
+- The standalone player can hide burstiness that a game/runtime client cannot.
+- If you are integrating this engine into another app, test in callback mode rather than relying only on WAV or direct-player behavior.

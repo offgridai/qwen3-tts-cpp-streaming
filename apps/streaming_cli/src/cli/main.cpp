@@ -40,34 +40,34 @@ int main(int argc, char** argv) {
                 options.model_identifier = "qwen3-tts-0.6b-f16";
                 options.live_preroll_ms = 150;
                 options.first_tail_window_frames = 3;
-                options.ramp_tail_window_frames = 6;
-                options.ramp_tail_window_count = 0;
+                options.ramp_tail_window_frames = 5;
+                options.ramp_tail_window_count = 2;
                 options.steady_tail_window_frames = 8;
                 options.context_frames = 3;
-                options.early_context_frames = 0;
-                options.early_context_window_count = 0;
+                options.early_context_frames = 2;
+                options.early_context_window_count = 2;
                 options.final_context_frames = 4;
             } else if (profile == "memory-saver") {
                 options.model_identifier = "qwen3-tts-0.6b-q5_k";
                 options.live_preroll_ms = 1000;
                 options.first_tail_window_frames = 3;
-                options.ramp_tail_window_frames = 6;
-                options.ramp_tail_window_count = 0;
+                options.ramp_tail_window_frames = 5;
+                options.ramp_tail_window_count = 2;
                 options.steady_tail_window_frames = 8;
                 options.context_frames = 3;
-                options.early_context_frames = 0;
-                options.early_context_window_count = 0;
+                options.early_context_frames = 2;
+                options.early_context_window_count = 2;
                 options.final_context_frames = 4;
             } else if (profile == "ultra-low") {
                 options.model_identifier = "qwen3-tts-0.6b-q4_k";
                 options.live_preroll_ms = 2000;
                 options.first_tail_window_frames = 3;
-                options.ramp_tail_window_frames = 6;
-                options.ramp_tail_window_count = 0;
+                options.ramp_tail_window_frames = 5;
+                options.ramp_tail_window_count = 2;
                 options.steady_tail_window_frames = 8;
                 options.context_frames = 3;
-                options.early_context_frames = 0;
-                options.early_context_window_count = 0;
+                options.early_context_frames = 2;
+                options.early_context_window_count = 2;
                 options.final_context_frames = 4;
             } else {
                 std::cerr << "Unknown --tts-profile '" << profile << "'. Expected realtime, memory-saver, or ultra-low.\n";
