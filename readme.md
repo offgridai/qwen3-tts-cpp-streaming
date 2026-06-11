@@ -1,72 +1,102 @@
 # qwen3-tts-cpp-streaming
 
-Native streaming TTS workspace with two explicit layers:
+Native Qwen3 TTS workspace with two explicit layers:
 
 - `engine/`: the core C++ TTS engine
-- `apps/streaming_cli/`: the thin streaming test harness
+- `apps/streaming_cli/`: a thin streaming harness for experiments and integration-style validation
 
-The repository no longer treats the engine as a vendored third-party dependency. It is part of the workspace and builds directly with the app layer.
+The engine is part of this repository's primary codebase. It is not treated as a vendored third-party dependency.
 
 ## Repository Layout
 
 ```text
 apps/
-  streaming_cli/     Thin wrapper CLI for streaming experiments
-engine/              Core TTS engine, CLI, tests, and model tooling
-docs/                Workspace-level architecture and benchmark notes
-examples/            Generated WAV examples
+  streaming_cli/     Thin wrapper CLI for streaming and callback experiments
+docs/                Architecture and baseline notes
+engine/              Core TTS engine, engine CLI, and pipeline code
+examples/            Generated WAV outputs
 models/              Shared GGUF model artifacts
-reference/           Shared speaker embeddings and reference audio
+reference/           Speaker embeddings and reference assets
 ```
+
+## What This Repository Is For
+
+This workspace is primarily for:
+
+- native local TTS experimentation
+- streaming decode and pacing work
+- VoiceDesign testing
+- validating callback-driven streaming behavior before integrating into another product
+
+The most useful artifact for downstream integration work is usually `qwen3_streaming_cli`, because it exercises the same engine path while exposing streaming-oriented controls and diagnostics.
 
 ## Build
 
-### 1. Build the core engine CLI
+### Visual Studio x64 build
 
-From the repository root:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\engine\build.ps1 `
-  -UseNinja `
-  -EnableCuda `
-  -EnableCudaGraphs `
-  -Configuration Release
-```
-
-Expected engine output:
-
-```text
-engine\build\Release\tts_engine_cli.exe
-```
-
-### 2. Build the streaming harness
+Configure:
 
 ```powershell
-cmake -S . -B build `
+cmake -S . -B build-vs2022-x64 `
   -G "Visual Studio 17 2022" `
   -A x64 `
-  -DGGML_CUDA=ON
-
-cmake --build build --config Release --target qwen3_streaming_cli
+  -DQWEN3_TTS_COREML=OFF `
+  -DQWEN3_TTS_EMBED_GGML=ON `
+  -DQWEN3_TTS_CUDA=ON `
+  -DGGML_CUDA=ON `
+  -DGGML_CUDA_GRAPHS=ON
 ```
 
-Expected harness output:
-
-```text
-build\Release\qwen3_streaming_cli.exe
-```
-
-The top-level build adds both `engine/` and `apps/streaming_cli/`, so you can also build both from the root workspace:
+Build the wrapper CLI:
 
 ```powershell
-cmake --build build --config Release --target tts_engine_cli qwen3_streaming_cli
+cmake --build build-vs2022-x64 --config Release --target qwen3_streaming_cli
 ```
+
+Build the engine CLI too:
+
+```powershell
+cmake --build build-vs2022-x64 --config Release --target tts_engine_cli qwen3_streaming_cli
+```
+
+Expected outputs:
+
+```text
+build-vs2022-x64\apps\streaming_cli\Release\qwen3_streaming_cli.exe
+build-vs2022-x64\engine\Release\tts_engine_cli.exe
+```
+
+### Ninja build
+
+If you already use the Ninja build tree in this repo:
+
+```powershell
+cmake --build build-ninja-cuda --target qwen3_streaming_cli
+```
+
+## Windows Runtime DLLs
+
+On Windows, `qwen3_streaming_cli.exe` needs the `ggml*.dll` files beside it or on `PATH`.
+
+If the app reports a missing `ggml-base.dll`, copy the DLLs from:
+
+```text
+build-vs2022-x64\bin\Release\
+```
+
+into:
+
+```text
+build-vs2022-x64\apps\streaming_cli\Release\
+```
+
+or add `build-vs2022-x64\bin\Release` to `PATH` before launching.
 
 ## Models
 
 Shared models live under `models/`.
 
-Common files:
+Common files in active use:
 
 ```text
 models\
@@ -77,52 +107,38 @@ models\
   qwen3-tts-tokenizer-f16.gguf
 ```
 
-The engine keeps its own conversion and setup tooling under `engine/scripts/`.
+VoiceDesign uses the distinct `qwen3-tts-1.7b-voicedesign-f16.gguf` model family.
 
-## Runtime
+## Running
 
 ### Engine CLI
 
 Basic engine invocation:
 
 ```powershell
-engine\build\Release\tts_engine_cli.exe `
+build-vs2022-x64\engine\Release\tts_engine_cli.exe `
   -m models `
   -t "Hello from the engine layer." `
   -o examples\engine_test.wav
 ```
 
-### Streaming Harness
+### Streaming CLI
 
-The wrapper now links directly to the engine library instead of launching a sibling executable via `std::system`.
-
-Example:
+Custom voice / speaker embedding example:
 
 ```powershell
-build\Release\qwen3_streaming_cli.exe `
+build-vs2022-x64\apps\streaming_cli\Release\qwen3_streaming_cli.exe `
   -m models `
   --model-identifier qwen3-tts-0.6b-f16 `
   --speaker-embedding reference\alfie_0.6b_f16.json `
   -t "Hello. Welcome to Alfie's Bodega. How can I help you today?" `
-  --instruct "happy" `
-  -o examples\alfie_06b_f16.wav
-```
-
-Realtime-oriented preset:
-
-```powershell
-build\Release\qwen3_streaming_cli.exe `
-  -m models `
-  --tts-profile realtime `
-  --speaker-embedding reference\alfie_0.6b_f16.json `
-  -t "Hello. Welcome to Alfie's Bodega. How can I help you today?" `
-  -o examples\alfie_realtime.wav
+  -o examples\streaming_test.wav
 ```
 
 VoiceDesign example:
 
 ```powershell
-build\Release\qwen3_streaming_cli.exe `
+build-vs2022-x64\apps\streaming_cli\Release\qwen3_streaming_cli.exe `
   -m models `
   --voice-design `
   --model-name qwen3-tts-1.7b-voicedesign-f16 `
@@ -131,35 +147,62 @@ build\Release\qwen3_streaming_cli.exe `
   -o examples\voice_design.wav
 ```
 
-VoiceDesign notes:
+If you want callback-style diagnostics without caring about the streamed samples, add:
 
-- The VoiceDesign workflow uses the distinct `qwen3-tts-1.7b-voicedesign-f16.gguf` model family.
-- `--voice-design-instruct` is the primary control surface for VoiceDesign runs.
+```powershell
+--simulate-stream-callback --dump-streaming-overlap
+```
+
+## Current Streaming Defaults
+
+The current wrapper/engine defaults are aimed at lower startup latency and smoother callback delivery:
+
+- `first_tail_window_frames=3`
+- `ramp_tail_window_frames=5`
+- `ramp_tail_window_count=2`
+- `steady_tail_window_frames=8`
+- `context_frames=3`
+- `early_context_frames=2`
+- `early_context_window_count=2`
+- `adaptive_steady_windows=on`
+- `adaptive_min_tail_window_frames=6`
+- `adaptive_low_watermark_ms=220`
+- `adaptive_high_watermark_ms=520`
+- `paced_audio_delivery=on`
+- `delivery_chunk_ms=80`
+- `delivery_start_buffer_ms=80`
+- `delivery_target_lead_ms=240`
+
+These are a better fit for downstream consumers that maintain their own playback buffer than the older, more burst-friendly standalone defaults.
+
+## VoiceDesign Notes
+
+- VoiceDesign models require instruction text.
 - Speaker embeddings are rejected for VoiceDesign models.
-- If a VoiceDesign model is loaded, the wrapper auto-detects it and enforces the correct input rules.
+- The wrapper auto-detects VoiceDesign model metadata and enforces the correct input rules.
+- Lowering temperature too aggressively can destabilize VoiceDesign output quality and termination behavior.
 
 ## Performance Notes
 
-- Streaming prewarm is enabled by default and is excluded from the reported `Total` timing.
-- Realtime performance should be evaluated from the hot request path, not from one-time warmup cost.
-- The 0.6B streaming path is currently the best fit for low-latency repeated runtime synthesis.
-- The 1.7B VoiceDesign path is viable for direct streaming use, but a better production pattern is:
-  1. use VoiceDesign once to create a target voice
-  2. switch to a faster clone/custom runtime path for repeated lines
+- Streaming prewarm is enabled by default and is excluded from the reported hot-path synthesis timing.
+- First useful PCM can arrive much earlier than fully safe playback start.
+- The standalone live player can hide burstiness that an external streaming client cannot.
+- For integration work, callback-mode cadence is the more useful benchmark than WAV completion time.
 
-Observed recent results:
+Recent callback-mode comparison on `qwen3-tts-1.7b-voicedesign-f16`:
 
-- `qwen3-tts-0.6b-f16` streaming:
-  - first PCM ready around `169-173 ms`
-  - throughput around `1.13x-1.22x realtime`
-- `qwen3-tts-1.7b-voicedesign-f16` streaming:
-  - first PCM ready around `173 ms`
-  - throughput around `1.16x realtime`
+- new defaults:
+  - first paced chunk: about `314 ms`
+  - first playback submit: about `702 ms`
+  - second window gap: about `387 ms`
+- older control settings:
+  - first paced chunk: about `312 ms`
+  - first playback submit: about `867 ms`
+  - second window gap: about `555 ms`
 
-## Design Notes
+So the current defaults preserve early first audio while improving downstream playback readiness and early cadence.
 
-- `engine/` owns model loading, generation, streaming decode, playback behavior, and audio file output.
-- `apps/streaming_cli/` owns harness presets, CLI ergonomics, and experiment-oriented defaults.
-- Shared assets remain top-level so both layers use the same `models/`, `reference/`, and `examples/` directories.
+## More Detail
 
-See [docs/architecture.md](C:/git/qwen3-tts-cpp-streaming/docs/architecture.md) for the current workspace architecture.
+- Architecture overview: [docs/architecture.md](C:/git/qwen3-tts-cpp-streaming/docs/architecture.md)
+- Current baseline notes: [docs/baseline_results.md](C:/git/qwen3-tts-cpp-streaming/docs/baseline_results.md)

@@ -59,14 +59,14 @@ struct tts_params {
     // After the first window, optionally use a few smaller ramp windows before
     // settling into the steady-state size. This reduces early burstiness while
     // preserving the larger hot-path decode shape for throughput.
-    int32_t ramp_tail_window_frames = 6;
-    int32_t ramp_tail_window_count = 0;
+    int32_t ramp_tail_window_frames = 5;
+    int32_t ramp_tail_window_count = 2;
     int32_t steady_tail_window_frames = 8;
     int32_t context_frames = 3;
     // Optional reduced left-context for early non-final windows. <=0 means
     // use context_frames for every non-final window.
-    int32_t early_context_frames = 0;
-    int32_t early_context_window_count = 0;
+    int32_t early_context_frames = 2;
+    int32_t early_context_window_count = 2;
     // Optional larger context for the final streaming window. A short steady-state
     // context is good for latency, but the last acoustic tail can need more left
     // context to avoid sounding clipped/truncated. <=0 means use context_frames.
@@ -106,10 +106,10 @@ struct tts_params {
 
     // Adaptive streaming: shrink steady-state decode windows when queued audio
     // is running low, then expand again once playback headroom recovers.
-    bool adaptive_steady_windows = false;
-    int32_t adaptive_min_tail_window_frames = 4;
-    int32_t adaptive_low_watermark_ms = 250;
-    int32_t adaptive_high_watermark_ms = 900;
+    bool adaptive_steady_windows = true;
+    int32_t adaptive_min_tail_window_frames = 6;
+    int32_t adaptive_low_watermark_ms = 220;
+    int32_t adaptive_high_watermark_ms = 520;
 
     // Diagnostic: print per-window streaming queue/decode timing so we can verify
     // whether generation is actually overlapping vocoder decode.
@@ -118,9 +118,9 @@ struct tts_params {
     // Optional paced delivery: keep coarse decode windows for throughput, but
     // emit smaller audio chunks to downstream consumers and live playback.
     bool paced_audio_delivery = true;
-    int32_t delivery_chunk_ms = 40;
-    int32_t delivery_start_buffer_ms = 150;
-    int32_t delivery_target_lead_ms = 0;
+    int32_t delivery_chunk_ms = 80;
+    int32_t delivery_start_buffer_ms = 80;
+    int32_t delivery_target_lead_ms = 240;
     bool paced_live_playback = false;
     int32_t steady_split_decode_frames = 0;
     std::function<bool(const float * samples, int32_t n_samples, int32_t sample_rate, bool is_final)> audio_chunk_callback;

@@ -2,40 +2,42 @@
 
 ## Purpose
 
-This repository is organized as a native TTS workspace with a clear split between:
+This repository is a native Qwen3 TTS workspace with two explicit layers:
 
-- `engine/`: the core synthesis engine
-- `apps/streaming_cli/`: a thin streaming harness used for profiling and regression testing
+- `engine/`: the core C++ TTS engine
+- `apps/streaming_cli/`: a thin streaming harness for experiments, profiling, and integration-style testing
 
-The engine is part of the repository's primary codebase. It is no longer described or laid out as a third-party subtree.
+The engine is first-party code in this repository. It is not treated as a vendored third-party subtree.
 
 ## High-Level Flow
 
 ```text
-streaming harness CLI
-        ↓
+streaming_cli
+    ->
 engine C++ API
-        ↓
-tokenizer + optional speaker prompt + transformer + vocoder
-        ↓
-24 kHz mono PCM / WAV output
+    ->
+tokenizer + optional instruction/speaker conditioning + transformer + vocoder
+    ->
+24 kHz mono PCM
+    ->
+live playback and/or WAV output
 ```
 
 ## Model Families
 
-The engine currently recognizes three distinct model families:
+The engine currently recognizes three model families:
 
 - `base`
-  - clone-oriented path
-  - supports speaker embeddings / reference-audio-derived prompts
+  - general TTS path
+  - may be used with speaker embeddings / cloned prompts depending on model assets
 - `custom_voice`
-  - named-speaker path
-  - may also accept style instructions depending on model metadata
+  - speaker-oriented path
+  - supports named or embedding-driven voice selection
 - `voice_design`
-  - instruction-driven persona/voice design path
+  - instruction-driven persona design
   - does not use speaker embeddings
 
-This distinction matters because `instruction` is only the transport field. The runtime meaning depends on the loaded model family.
+`instruction` is just the transport field. Its runtime meaning depends on the loaded model family.
 
 ## Layer Responsibilities
 
@@ -44,98 +46,102 @@ This distinction matters because `instruction` is only the transport field. The 
 Owns:
 
 - GGUF model loading
-- tokenizer
-- instruction tokenization and prompt assembly
-- speaker embedding extraction and reuse
-- autoregressive code generation
-- streaming decode strategy
-- live playback support
-- native engine CLI
-- correctness tests and model tooling
+- tokenizer and prompt assembly
+- speaker embedding extraction and loading
+- autoregressive speech-code generation
+- streaming decode policy
+- paced PCM delivery
+- optional live playback
+- engine CLI
 
 ### `apps/streaming_cli/`
 
 Owns:
 
-- harness-specific CLI surface
-- profile aliases like `realtime`, `memory-saver`, and `ultra-low`
-- explicit VoiceDesign CLI ergonomics
-- wrapper-specific defaults for latency experiments
-- integration-oriented packaging of the engine API
+- harness-facing CLI surface
+- profile aliases and test ergonomics
+- wrapper defaults for streaming experiments
+- VoiceDesign-specific UX checks
+- chunk callback wiring for integration-style tests
 
-## Important Change
+## Important Structural Decision
 
-The wrapper no longer launches the engine CLI as a subprocess.
+The streaming harness links directly against the engine library.
 
-Old path:
-
-```text
-wrapper CLI → shell out to engine CLI
-```
-
-Current path:
+Old shape:
 
 ```text
-wrapper CLI → direct link to engine library
+wrapper CLI -> shell out to engine CLI
 ```
 
-That removes:
+Current shape:
 
-- executable path discovery
-- command-string assembly
-- duplicated flag forwarding
-- brittle runtime coupling between two binaries
+```text
+wrapper CLI -> direct engine API call
+```
+
+That removes duplicated flag forwarding, subprocess orchestration, and binary-to-binary coupling.
+
+## Streaming Design
+
+The current low-latency path is built around:
+
+- small first decode window
+- a short ramp before steady-state windows
+- reduced early left-context
+- adaptive steady windows when queue depth falls
+- paced PCM delivery for downstream consumers
+
+Current default startup/steady policy:
+
+- `first_tail_window_frames=3`
+- `ramp_tail_window_frames=5`
+- `ramp_tail_window_count=2`
+- `steady_tail_window_frames=8`
+- `context_frames=3`
+- `early_context_frames=2`
+- `early_context_window_count=2`
+- `adaptive_steady_windows=on`
+- `adaptive_min_tail_window_frames=6`
+- `delivery_chunk_ms=80`
+- `delivery_start_buffer_ms=80`
+- `delivery_target_lead_ms=240`
+
+These defaults are aimed at callback-driven consumers such as game/runtime integrations, not just the standalone live player.
 
 ## VoiceDesign Support
 
-VoiceDesign is now exposed as a first-class wrapper feature:
+VoiceDesign is a first-class workflow in the harness:
 
-- the wrapper detects `voice_design` model metadata from the engine
-- `--voice-design` and `--voice-design-instruct` make the intended path explicit
+- the wrapper detects `voice_design` metadata from the engine
+- `--voice-design` and `--voice-design-instruct` make the path explicit
 - speaker embeddings are rejected for VoiceDesign models
-- a VoiceDesign model requires non-empty instruction text
+- VoiceDesign requires non-empty instruction text
 
-The current recommended usage pattern is:
+Recommended usage pattern:
 
-1. use `voice_design` when you want to create or audition a new persona
-2. use the faster 0.6B runtime path for repeated low-latency lines when possible
+1. use VoiceDesign when creating or auditioning a persona
+2. use the faster runtime path for repeated low-latency lines when possible
 
 ## Build Layout
 
 ```text
 root CMakeLists.txt
-├── add_subdirectory(engine)
-└── add_subdirectory(apps/streaming_cli)
+|-- add_subdirectory(engine)
+`-- add_subdirectory(apps/streaming_cli)
 ```
 
-This produces two primary executables:
+Primary binaries:
 
 - `tts_engine_cli`
 - `qwen3_streaming_cli`
 
 ## Shared Assets
 
-The workspace keeps shared runtime data at the root:
+Shared runtime assets remain at the workspace root:
 
 - `models/`
 - `reference/`
 - `examples/`
 
-That lets both layers operate on the same assets without maintaining duplicate copies under the engine or wrapper.
-
-## Consolidation Decisions
-
-To reduce redundancy:
-
-- duplicated top-level engine scripts were removed
-- the engine remains the canonical home for model setup, benchmarking, and engine test tooling
-- the app layer contains only wrapper-specific source and build files
-
-## Near-Term Roadmap
-
-Remaining cleanup that still makes sense after this restructuring:
-
-1. Add a true reusable "voice design then clone" workflow
-2. Add a streaming chunk callback API to the engine layer
-3. Move more wrapper presets into explicit config objects
-4. Add harness-specific integration tests for VoiceDesign and profile validation
+That keeps engine and harness runs on the same model and reference data.
