@@ -2,7 +2,7 @@
 
 ## Current Streaming Defaults
 
-Current low-latency / less-bursty defaults:
+Current balanced standalone defaults:
 
 - `first_tail_window_frames=3`
 - `ramp_tail_window_frames=5`
@@ -23,27 +23,45 @@ Current low-latency / less-bursty defaults:
 - `async_streaming_decode=on`
 - `prewarm_streaming=on`
 
-These defaults are tuned for callback-driven consumers such as Offgrid-style clients, where earlier usable audio and steadier delivery matter more than peak batch efficiency.
+These defaults remain the best fit for the built-in standalone live player.
+
+## Offgrid Callback Profile
+
+For callback-driven consumers that maintain their own playback queue, use `--tts-profile offgrid-callback`:
+
+- `first_tail_window_frames=3`
+- `ramp_tail_window_frames=6`
+- `ramp_tail_window_count=0`
+- `steady_tail_window_frames=8`
+- `context_frames=3`
+- `early_context_frames=2`
+- `early_context_window_count=2`
+- `final_context_frames=4`
+- `paced_audio_delivery=on`
+- `delivery_chunk_ms=40`
+- `delivery_start_buffer_ms=40`
+- `delivery_target_lead_ms=300`
+- `steady_split_decode_frames=4`
 
 ## What Changed
 
-Earlier streaming settings optimized well for the standalone player, but still produced larger decode bursts for external consumers.
+Earlier callback delivery could dump multiple chunks at the same timestamp and then leave longer gaps. The retained qwen-side pacing fix removes that zero-gap burst pattern.
 
-The current defaults keep:
+The retained callback-specific profile keeps:
 
 - the same `3`-frame first window
-- smaller early ramp windows
+- no ramp windows after the first tail
 - reduced early left-context
-- adaptive steady-state windows
-- a paced emitter with a non-zero lead target
+- a paced emitter with a larger lead target
+- steady-window decode splitting for smaller callback arrivals
 
-The qwen-side paced callback path also no longer waits on an unnecessarily large startup buffer when it is feeding an external callback instead of qwen's own paced live player.
+The qwen-side paced callback path also no longer uses the old zero-gap catch-up behavior that was especially unfriendly to downstream consumers.
 
 ## Verified Comparison
 
 Representative callback-mode VoiceDesign run on `qwen3-tts-1.7b-voicedesign-f16`:
 
-### New defaults
+### Balanced standalone defaults
 
 - first paced chunk: `314 ms`
 - first playback submit: `702 ms`
@@ -51,24 +69,25 @@ Representative callback-mode VoiceDesign run on `qwen3-tts-1.7b-voicedesign-f16`
 - max window gap: `532 ms`
 - throughput: `1.03x realtime`
 
-### Old-style control
+### Callback-oriented profile
 
-- first paced chunk: `312 ms`
-- first playback submit: `867 ms`
-- second window gap: `555 ms`
-- max window gap: `555 ms`
-- throughput: `1.07x realtime`
+- first paced chunk: `292 ms`
+- first playback submit: `609 ms`
+- second window gap: `317 ms`
+- max window gap: `382 ms`
+- queued audio at playback start: `536.9 ms`
+- note: this profile is intended for external buffered consumers, not the standalone player
 
 ## Interpretation
 
 The retained improvements are:
 
 - startup remains essentially unchanged for first useful PCM
-- downstream consumers can begin playback materially sooner
+- callback consumers receive smaller, less bursty arrivals
 - the first major inter-window gap is smaller
-- paced delivery becomes friendlier to clients that manage their own playback buffer
+- the callback profile should be paired with a real client-side playback buffer
 
-The tradeoff is a small reduction in peak throughput, but the tested path remained faster than realtime.
+The tradeoff is that the callback-oriented profile is not suitable for qwen's own standalone live player. It shifts work toward steadier external delivery rather than maximizing standalone playback smoothness.
 
 ## Practical Guidance
 

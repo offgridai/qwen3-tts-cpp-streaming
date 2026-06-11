@@ -155,7 +155,7 @@ If you want callback-style diagnostics without caring about the streamed samples
 
 ## Current Streaming Defaults
 
-The current wrapper/engine defaults are aimed at lower startup latency and smoother callback delivery:
+The default wrapper/engine settings remain a balanced standalone profile:
 
 - `first_tail_window_frames=3`
 - `ramp_tail_window_frames=5`
@@ -173,7 +173,7 @@ The current wrapper/engine defaults are aimed at lower startup latency and smoot
 - `delivery_start_buffer_ms=80`
 - `delivery_target_lead_ms=240`
 
-These are a better fit for downstream consumers that maintain their own playback buffer than the older, more burst-friendly standalone defaults.
+For Offgrid-style callback consumers that maintain their own playback buffer, use `--tts-profile offgrid-callback`. That profile keeps the `3`-frame first window, removes ramp windows, uses `40 ms` paced chunks with a `300 ms` target lead, and enables `steady_split_decode_frames=4` to break steady decode windows into smaller callback arrivals.
 
 ## VoiceDesign Notes
 

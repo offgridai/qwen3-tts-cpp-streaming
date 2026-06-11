@@ -107,7 +107,24 @@ Current default startup/steady policy:
 - `delivery_start_buffer_ms=80`
 - `delivery_target_lead_ms=240`
 
-These defaults are aimed at callback-driven consumers such as game/runtime integrations, not just the standalone live player.
+These defaults are a balanced standalone profile. They work well for the built-in local player and remain a reasonable baseline for integrations, but they are not the most aggressive callback-oriented settings.
+
+For callback-driven consumers such as Offgrid/LineCoach, the CLI now exposes an explicit `offgrid-callback` profile:
+
+- `first_tail_window_frames=3`
+- `ramp_tail_window_frames=6`
+- `ramp_tail_window_count=0`
+- `steady_tail_window_frames=8`
+- `context_frames=3`
+- `early_context_frames=2`
+- `early_context_window_count=2`
+- `final_context_frames=4`
+- `delivery_chunk_ms=40`
+- `delivery_start_buffer_ms=40`
+- `delivery_target_lead_ms=300`
+- `steady_split_decode_frames=4`
+
+That profile is intended for clients that maintain their own playback queue and want smaller callback arrivals. It is not recommended for the standalone CLI live player, which performs better with the balanced default profile.
 
 ## VoiceDesign Support
 
