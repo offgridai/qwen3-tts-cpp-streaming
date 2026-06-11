@@ -84,9 +84,11 @@ public:
         stream_start_ms_ = stream_start_ms;
         sample_rate_ = sample_rate;
         preroll_samples_ = live_preroll_ms > 0 ? (size_t) (((int64_t) sample_rate * live_preroll_ms) / 1000) : 0;
+        startup_min_samples_ = preroll_samples_ > 0 ? std::max(preroll_samples_, preroll_samples_ * 2) : 0;
         playback_started_ = preroll_samples_ == 0;
         starvation_active_ = false;
         preroll_buffer_.clear();
+        submitted_samples_total_.store(0);
         if (sample_rate <= 0) { last_error_ = "invalid sample rate"; return false; }
         WAVEFORMATEX fmt{};
         fmt.wFormatTag = WAVE_FORMAT_PCM;
@@ -135,7 +137,7 @@ public:
 
             if (!playback_started_ && preroll_samples_ > 0) {
                 preroll_buffer_.insert(preroll_buffer_.end(), pcm.begin(), pcm.end());
-                if (preroll_buffer_.size() < preroll_samples_) {
+                if (preroll_buffer_.size() < preroll_samples_ || preroll_buffer_.size() < startup_min_samples_) {
                     return true;
                 }
                 queue_.push_back(std::move(preroll_buffer_));
@@ -222,15 +224,26 @@ private:
 #ifdef _WIN32
     struct PendingChunk { std::vector<int16_t> pcm; WAVEHDR hdr{}; };
 
+    size_t estimated_played_samples_unlocked() const {
+        const int64_t first_submit = first_submit_ms_.load();
+        if (first_submit < 0 || sample_rate_ <= 0) {
+            return 0;
+        }
+        const int64_t elapsed_ms = std::max<int64_t>(0, stream_start_ms_ > 0 ? (get_time_ms() - stream_start_ms_ - first_submit) : 0);
+        return (size_t) (((int64_t) sample_rate_ * elapsed_ms) / 1000);
+    }
+
     size_t queued_samples_locked() const {
         size_t total = preroll_buffer_.size();
         for (const auto & pcm : queue_) {
             total += pcm.size();
         }
-        for (const auto & chunk : pending_) {
-            total += chunk->pcm.size();
-        }
-        return total;
+        const int64_t submitted_total = submitted_samples_total_.load();
+        const size_t played = estimated_played_samples_unlocked();
+        const size_t pending_remaining = submitted_total > 0
+            ? (size_t) std::max<int64_t>(0, submitted_total - (int64_t) played)
+            : 0;
+        return total + pending_remaining;
     }
 
     void retire_completed(bool wait_all) {
@@ -254,6 +267,7 @@ private:
 
     bool submit_pcm(std::vector<int16_t> pcm) {
         if (!wave_out_ || pcm.empty()) { return true; }
+        const size_t pcm_samples = pcm.size();
         auto chunk = std::make_unique<PendingChunk>();
         chunk->pcm = std::move(pcm);
         chunk->hdr.lpData = reinterpret_cast<LPSTR>(chunk->pcm.data());
@@ -269,13 +283,17 @@ private:
             last_error_ = "waveOutWrite failed";
             return false;
         }
+        submitted_samples_total_.fetch_add((int64_t) pcm_samples);
         int64_t expected = -1;
         const int64_t submitted_ms = stream_start_ms_ > 0 ? (get_time_ms() - stream_start_ms_) : 0;
         if (first_submit_ms_.compare_exchange_strong(expected, submitted_ms)) {
-            size_t queued_samples = chunk->pcm.size();
+            size_t queued_samples = pcm_samples;
             {
                 std::lock_guard<std::mutex> lock(mutex_);
-                queued_samples += queued_samples_locked();
+                queued_samples += preroll_buffer_.size();
+                for (const auto & queued_pcm : queue_) {
+                    queued_samples += queued_pcm.size();
+                }
             }
             queued_samples_at_first_submit_.store((int64_t) queued_samples);
             fprintf(stderr, "  [player] playback_start wall_ms=%lld queued_audio_ms=%.1f\n",
@@ -297,8 +315,7 @@ private:
                 if (!stopping_ &&
                     playback_started_ &&
                     first_submit_ms_.load() >= 0 &&
-                    queue_.empty() &&
-                    pending_.empty() &&
+                    queued_samples_locked() == 0 &&
                     !starvation_active_) {
                     const int64_t starvation_ms = stream_start_ms_ > 0 ? (get_time_ms() - stream_start_ms_) : 0;
                     int64_t expected = -1;
@@ -309,7 +326,7 @@ private:
                             event_index,
                             (long long) starvation_ms);
                 }
-                cv_.wait(lock, [this]() {
+                cv_.wait_for(lock, std::chrono::milliseconds(5), [this]() {
                     return stopping_ || !queue_.empty();
                 });
                 if (!queue_.empty()) {
@@ -342,6 +359,7 @@ private:
     bool stopping_ = false;
     int32_t sample_rate_ = 0;
     size_t preroll_samples_ = 0;
+    size_t startup_min_samples_ = 0;
     std::vector<int16_t> preroll_buffer_;
     bool playback_started_ = true;
     int64_t stream_start_ms_ = 0;
@@ -349,6 +367,7 @@ private:
     std::atomic<int64_t> first_starvation_ms_{-1};
     std::atomic<int32_t> starvation_events_{0};
     std::atomic<int64_t> queued_samples_at_first_submit_{0};
+    std::atomic<int64_t> submitted_samples_total_{0};
     bool starvation_active_ = false;
 #endif
     std::string last_error_;
