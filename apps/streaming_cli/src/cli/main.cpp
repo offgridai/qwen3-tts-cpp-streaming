@@ -1,5 +1,7 @@
 #include "offgrid_tts/Qwen3StreamingTts.h"
 
+#include <algorithm>
+#include <filesystem>
 #include <iostream>
 #include <string>
 
@@ -8,6 +10,7 @@ int main(int argc, char** argv) {
     std::string speaker_embedding;
     std::string text = "Hello. Welcome to Alfie's Bodega. I'm Alfie. What can I get for you today?";
     bool simulate_stream_callback = false;
+    int repeat = 1;
 
     TtsStreamOptions options;
 
@@ -98,6 +101,13 @@ int main(int argc, char** argv) {
         else if (a == "--paced-live-playback") options.paced_live_playback = true;
         else if (a == "--no-paced-live-playback") options.paced_live_playback = false;
         else if (a == "--steady-split-decode-frames") options.steady_split_decode_frames = std::stoi(next());
+        else if (a == "--cache-instruction-tokens") options.cache_instruction_tokens = true;
+        else if (a == "--no-cache-instruction-tokens") options.cache_instruction_tokens = false;
+        else if (a == "--instruction-cache-key") options.instruction_cache_key = next();
+        else if (a == "--warm-voice-profile") options.warm_voice_profile = true;
+        else if (a == "--warm-voice-profile-key") options.warm_voice_profile_key = next();
+        else if (a == "--warmup-text") options.warmup_text = next();
+        else if (a == "--repeat") repeat = std::max(1, std::stoi(next()));
         else if (a == "--simulate-stream-callback") simulate_stream_callback = true;
         else if (a == "-h" || a == "--help") {
             std::cout << "Usage: qwen3_streaming_cli -m models --model-identifier qwen3-tts-0.6b-f16 --speaker-embedding speaker.json -t text -o out.wav\n"
@@ -125,6 +135,12 @@ int main(int argc, char** argv) {
                       << "  --delivery-target-lead-ms <ms>\n"
                       << "  --paced-live-playback | --no-paced-live-playback\n"
                       << "  --steady-split-decode-frames <n>\n"
+                      << "  --cache-instruction-tokens | --no-cache-instruction-tokens\n"
+                      << "  --instruction-cache-key <key>\n"
+                      << "  --warm-voice-profile\n"
+                      << "  --warm-voice-profile-key <key>\n"
+                      << "  --warmup-text <text>\n"
+                      << "  --repeat <n>\n"
                       << "  --simulate-stream-callback\n"
                       << "  --dump-streaming-overlap\n"
                       << "\n"
@@ -145,5 +161,26 @@ int main(int argc, char** argv) {
         on_chunk = [](const TtsStreamChunk&) {};
     }
 
-    return tts.synthesize_streaming(text, options, on_chunk) ? 0 : 1;
+    const std::filesystem::path base_output = options.output_wav.empty()
+        ? std::filesystem::path("examples/bridge_test.wav")
+        : std::filesystem::path(options.output_wav);
+
+    for (int run = 0; run < repeat; ++run) {
+        TtsStreamOptions run_options = options;
+        if (repeat > 1) {
+            std::filesystem::path run_output = base_output;
+            const std::string stem = run_output.stem().string();
+            const std::string ext = run_output.extension().string();
+            run_output.replace_filename(stem + "_run" + std::to_string(run + 1) + ext);
+            run_options.output_wav = run_output.string();
+            std::cout << "[repeat] run " << (run + 1) << "/" << repeat
+                      << " output=" << run_options.output_wav << "\n";
+        }
+
+        if (!tts.synthesize_streaming(text, run_options, on_chunk)) {
+            return 1;
+        }
+    }
+
+    return 0;
 }

@@ -9,6 +9,8 @@
 #include <vector>
 #include <functional>
 #include <cstdint>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace qwen3_tts {
 namespace pipeline_internal {
@@ -46,6 +48,9 @@ struct tts_params {
 
     // Optional style/voice instruction
     std::string instruction;
+    bool cache_instruction_tokens = false;
+    std::string instruction_cache_key;
+    std::string voice_profile_key;
 
     // Optional named speaker (for CustomVoice models)
     std::string speaker;
@@ -217,6 +222,14 @@ public:
     
     // Set progress callback
     void set_progress_callback(tts_progress_callback_t callback);
+
+    // Pre-tokenize and retain an instruction prefix for later reuse.
+    bool prime_instruction_cache(const std::string & instruction,
+                                 const std::string & cache_key = "");
+
+    // Run a hidden throwaway synthesis once for a fixed voice/instruction profile.
+    bool warm_voice_profile(const std::string & warmup_text,
+                            const tts_params & params = tts_params());
     
     // Get error message
     const std::string & get_error() const { return error_msg_; }
@@ -248,6 +261,8 @@ private:
     std::string tts_model_path_;
     std::string decoder_model_path_;
     tts_progress_callback_t progress_callback_;
+    std::unordered_map<std::string, std::vector<int32_t>> instruction_token_cache_;
+    std::unordered_set<std::string> warmed_voice_profiles_;
 };
 
 // Utility: Load audio file (WAV format)

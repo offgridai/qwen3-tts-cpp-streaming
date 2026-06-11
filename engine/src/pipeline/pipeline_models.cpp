@@ -75,6 +75,8 @@ bool Qwen3TTS::load_models(const std::string & model_dir, const std::string & mo
     encoder_loaded_ = false;
     transformer_loaded_ = false;
     decoder_loaded_ = false;
+    instruction_token_cache_.clear();
+    warmed_voice_profiles_.clear();
 
     const char * low_mem_env = std::getenv("QWEN3_TTS_LOW_MEM");
     low_mem_mode_ = low_mem_env && low_mem_env[0] != '\0' && low_mem_env[0] != '0';

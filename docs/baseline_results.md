@@ -79,3 +79,30 @@ The tradeoff is a small reduction in peak throughput, but the tested path remain
   - max window gap
 - The standalone player can hide burstiness that a game/runtime client cannot.
 - If you are integrating this engine into another app, test in callback mode rather than relying only on WAV or direct-player behavior.
+
+## VoiceDesign Persona Reuse
+
+Separate from streaming-window tuning, the engine now supports two retained VoiceDesign reuse features:
+
+- cached instruction tokens keyed by a stable profile key
+- one-time voice-profile warmup keyed by that same profile key
+
+Representative same-process test results on `qwen3-tts-1.7b-voicedesign-f16`:
+
+- baseline hot run:
+  - first PCM ready: `290 ms`
+  - first playback submit: `659 ms`
+  - second window gap: `369 ms`
+  - max window gap: `560 ms`
+- cached+warmed hot run:
+  - first PCM ready: `278 ms`
+  - first playback submit: `692 ms`
+  - second window gap: `414 ms`
+  - max window gap: `507 ms`
+
+Interpretation:
+
+- keep the features for repeated fixed-profile VoiceDesign conversations
+- do not treat them as a burstiness fix
+- steady-state delivery is still dominated by vocoder/decode timing, not instruction tokenization
+- if the app varies instruction text per line, use stable profile warmup separately from exact-instruction token caching

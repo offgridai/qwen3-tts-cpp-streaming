@@ -610,7 +610,32 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
     std::vector<int32_t> text_tokens = self.tokenizer_.encode_for_tts(text);
     std::vector<int32_t> instruct_tokens;
     if (!params.instruction.empty()) {
-        instruct_tokens = self.tokenizer_.encode_instruct(params.instruction);
+        const std::string instruction_cache_key = params.instruction_cache_key.empty()
+            ? params.instruction
+            : params.instruction_cache_key;
+        if (params.cache_instruction_tokens) {
+            auto found = self.instruction_token_cache_.find(instruction_cache_key);
+            if (found != self.instruction_token_cache_.end()) {
+                instruct_tokens = found->second;
+                if (params.print_progress) {
+                    fprintf(stderr, "Instruction token cache hit: key=%s tokens=%zu\n",
+                            instruction_cache_key.c_str(),
+                            instruct_tokens.size());
+                }
+            } else {
+                instruct_tokens = self.tokenizer_.encode_instruct(params.instruction);
+                if (!instruct_tokens.empty()) {
+                    self.instruction_token_cache_[instruction_cache_key] = instruct_tokens;
+                    if (params.print_progress) {
+                        fprintf(stderr, "Instruction token cache store: key=%s tokens=%zu\n",
+                                instruction_cache_key.c_str(),
+                                instruct_tokens.size());
+                    }
+                }
+            }
+        } else {
+            instruct_tokens = self.tokenizer_.encode_instruct(params.instruction);
+        }
     }
     result.t_tokenize_ms = get_time_ms() - t_tokenize_start;
     sample_memory("synth/after-tokenize");

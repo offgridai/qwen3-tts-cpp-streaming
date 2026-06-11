@@ -182,6 +182,35 @@ These are a better fit for downstream consumers that maintain their own playback
 - The wrapper auto-detects VoiceDesign model metadata and enforces the correct input rules.
 - Lowering temperature too aggressively can destabilize VoiceDesign output quality and termination behavior.
 
+For repeated VoiceDesign use with a fixed persona, the engine now supports:
+
+- instruction-token caching
+- one-time voice-profile warmup
+
+These help hot-start latency for repeated requests that reuse the same stable profile key. They do not materially change steady vocoder window cadence by themselves.
+
+Important:
+
+- reuse a stable `instruction_cache_key` only when you intentionally want the same instruction text reused
+- if your app appends per-line emotional or delivery modifiers, keep instruction-token caching keyed to the exact instruction text and use the stable profile key only for `warm_voice_profile`
+
+Example:
+
+```powershell
+build-vs2022-x64\apps\streaming_cli\Release\qwen3_streaming_cli.exe `
+  -m models `
+  --voice-design `
+  --model-name qwen3-tts-1.7b-voicedesign-f16 `
+  --cache-instruction-tokens `
+  --instruction-cache-key npc_lana_profile `
+  --warm-voice-profile `
+  --warm-voice-profile-key npc_lana_profile `
+  --warmup-text "Hello." `
+  --voice-design-instruct "A 30 year old woman with a rich feminine voice." `
+  -t "I was not expecting visitors this late." `
+  -o examples\voice_design_cached.wav
+```
+
 ## Performance Notes
 
 - Streaming prewarm is enabled by default and is excluded from the reported hot-path synthesis timing.
@@ -201,6 +230,24 @@ Recent callback-mode comparison on `qwen3-tts-1.7b-voicedesign-f16`:
   - second window gap: about `555 ms`
 
 So the current defaults preserve early first audio while improving downstream playback readiness and early cadence.
+
+Recent same-process VoiceDesign cache/warmup test on the branch that introduced persona reuse:
+
+- baseline hot run:
+  - first PCM ready: about `290 ms`
+  - first playback submit: about `659 ms`
+  - second window gap: about `369 ms`
+- cached + warmed hot run:
+  - first PCM ready: about `278 ms`
+  - first playback submit: about `692 ms`
+  - second window gap: about `414 ms`
+
+Interpretation:
+
+- retained: instruction-token caching and one-time voice-profile warmup
+- not retained as a cadence fix: expectation that these would smooth steady decode delivery
+
+They are useful for repeated fixed-profile VoiceDesign requests, but vocoder/decode cadence still dominates burstiness.
 
 ## More Detail
 

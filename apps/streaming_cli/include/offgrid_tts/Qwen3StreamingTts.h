@@ -42,6 +42,11 @@ struct TtsStreamOptions {
     int32_t delivery_target_lead_ms = 240;
     bool paced_live_playback = false;
     int32_t steady_split_decode_frames = 0;
+    bool cache_instruction_tokens = false;
+    std::string instruction_cache_key;
+    bool warm_voice_profile = false;
+    std::string warm_voice_profile_key;
+    std::string warmup_text = "Hello.";
 };
 
 using TtsChunkCallback = std::function<void(const TtsStreamChunk&)>;
@@ -53,6 +58,7 @@ public:
 
     bool load(const std::string& model_dir);
     bool load_speaker_embedding(const std::string& path);
+    bool warm_voice_profile(const TtsStreamOptions& options);
     bool synthesize_streaming(const std::string& text, const TtsStreamOptions& options, TtsChunkCallback on_chunk);
 
 private:

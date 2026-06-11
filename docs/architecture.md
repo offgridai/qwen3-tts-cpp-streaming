@@ -117,11 +117,18 @@ VoiceDesign is a first-class workflow in the harness:
 - `--voice-design` and `--voice-design-instruct` make the path explicit
 - speaker embeddings are rejected for VoiceDesign models
 - VoiceDesign requires non-empty instruction text
+- fixed-profile VoiceDesign can reuse cached instruction tokens
+- fixed-profile VoiceDesign can do a one-time warmup pass keyed by profile identity
 
 Recommended usage pattern:
 
 1. use VoiceDesign when creating or auditioning a persona
-2. use the faster runtime path for repeated low-latency lines when possible
+2. when a persona remains fixed across many lines, reuse a stable cache key
+3. optionally pay one warmup request once per profile before the hot line path
+
+These two reuse mechanisms improve repeated-request startup cost, but they do not materially alter steady streaming decode cadence. Burstiness remains primarily a decode/vocoder scheduling concern.
+
+If the app changes the instruction text per line, do not force all of those lines through the same instruction-token cache key. That would intentionally reuse stale instruction tokens. In that case, keep exact-instruction token caching and reserve the stable profile key for one-time persona warmup.
 
 ## Build Layout
 
