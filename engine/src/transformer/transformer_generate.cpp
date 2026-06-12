@@ -144,7 +144,6 @@ bool TTSTransformer::generate_streaming(const int32_t * text_tokens, int32_t n_t
         }
     }
     clear_kv_cache();
-
     if (impl_->state.code_pred_cache.n_ctx < 16) {
         if (!init_code_pred_kv_cache(16)) {
             return false;

@@ -10,10 +10,18 @@ build-ninja-cuda\apps\streaming_cli\qwen3_streaming_cli.exe ^
   --first-tail-window-frames 3 ^
   --ramp-tail-window-frames 6 ^
   --ramp-tail-window-count 0 ^
-  --steady-tail-window-frames 8 ^
+  --steady-tail-window-frames 10 ^
   --context-frames 3 ^
+  --early-context-frames 2 ^
+  --early-context-window-count 2 ^
   --final-context-frames 4 ^
-  --live-preroll-ms 250 ^
+  --steady-split-decode-frames 5 ^
+  --delivery-target-lead-ms 450 ^
+  --linecoach-proxy-playback ^
+  --callback-preroll-ms 350 ^
+  --callback-buffer-floor-ms 250 ^
+  --callback-coalesce-ms 40 ^
+  --callback-max-burst-ms 500 ^
   --voice-design-instruct "A 30 year old woman with a rich feminine voice." ^
   -t "I was not expecting visitors this late. What a pleasure it is to meet you here." ^
-  -o examples\voice_design_safe.wav
+  -o examples\voice_design_quality_stable.wav

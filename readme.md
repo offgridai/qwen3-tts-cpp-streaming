@@ -155,25 +155,27 @@ If you want callback-style diagnostics without caring about the streamed samples
 
 ## Current Streaming Defaults
 
-The default wrapper/engine settings remain a balanced standalone profile:
+The default wrapper/engine settings now match the most reliable callback-oriented
+profile we found for Offgrid-style consumers:
 
 - `first_tail_window_frames=3`
-- `ramp_tail_window_frames=5`
-- `ramp_tail_window_count=2`
+- `ramp_tail_window_frames=6`
+- `ramp_tail_window_count=0`
 - `steady_tail_window_frames=8`
 - `context_frames=3`
 - `early_context_frames=2`
 - `early_context_window_count=2`
-- `adaptive_steady_windows=on`
+- `adaptive_steady_windows=off`
 - `adaptive_min_tail_window_frames=6`
 - `adaptive_low_watermark_ms=220`
 - `adaptive_high_watermark_ms=520`
 - `paced_audio_delivery=on`
-- `delivery_chunk_ms=80`
-- `delivery_start_buffer_ms=80`
-- `delivery_target_lead_ms=240`
+- `delivery_chunk_ms=40`
+- `delivery_start_buffer_ms=40`
+- `delivery_target_lead_ms=300`
+- `steady_split_decode_frames=4`
 
-For Offgrid-style callback consumers that maintain their own playback buffer, use `--tts-profile offgrid-callback`. That profile keeps the `3`-frame first window, removes ramp windows, uses `40 ms` paced chunks with a `300 ms` target lead, and enables `steady_split_decode_frames=4` to break steady decode windows into smaller callback arrivals.
+For Offgrid-style callback consumers that maintain their own playback buffer, `--tts-profile offgrid-callback` now resolves to these same defaults explicitly.
 
 ## VoiceDesign Notes
 

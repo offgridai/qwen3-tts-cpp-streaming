@@ -5,21 +5,22 @@
 Current balanced standalone defaults:
 
 - `first_tail_window_frames=3`
-- `ramp_tail_window_frames=5`
-- `ramp_tail_window_count=2`
+- `ramp_tail_window_frames=6`
+- `ramp_tail_window_count=0`
 - `steady_tail_window_frames=8`
 - `context_frames=3`
 - `early_context_frames=2`
 - `early_context_window_count=2`
 - `final_context_frames=4`
-- `adaptive_steady_windows=on`
+- `adaptive_steady_windows=off`
 - `adaptive_min_tail_window_frames=6`
 - `adaptive_low_watermark_ms=220`
 - `adaptive_high_watermark_ms=520`
 - `paced_audio_delivery=on`
-- `delivery_chunk_ms=80`
-- `delivery_start_buffer_ms=80`
-- `delivery_target_lead_ms=240`
+- `delivery_chunk_ms=40`
+- `delivery_start_buffer_ms=40`
+- `delivery_target_lead_ms=300`
+- `steady_split_decode_frames=4`
 - `async_streaming_decode=on`
 - `prewarm_streaming=on`
 
@@ -37,6 +38,7 @@ For callback-driven consumers that maintain their own playback queue, use `--tts
 - `early_context_frames=2`
 - `early_context_window_count=2`
 - `final_context_frames=4`
+- `adaptive_steady_windows=off`
 - `paced_audio_delivery=on`
 - `delivery_chunk_ms=40`
 - `delivery_start_buffer_ms=40`

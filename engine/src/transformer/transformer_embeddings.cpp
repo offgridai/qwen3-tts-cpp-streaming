@@ -379,7 +379,6 @@ bool transformer_internal::ops::build_prefill_graph(TTSTransformer & self,
     }
     memcpy(trailing_text_hidden.data() + (size_t) (trailing_len - 1) * hidden_size,
            tts_eos_embed.data(), hidden_size * sizeof(float));
-
     return true;
 }
 

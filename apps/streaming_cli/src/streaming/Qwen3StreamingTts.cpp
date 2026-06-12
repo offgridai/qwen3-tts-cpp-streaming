@@ -80,18 +80,17 @@ bool Qwen3StreamingTts::warm_voice_profile(const TtsStreamOptions& options) {
     }
 
     qwen3_tts::tts_params params;
-    params.print_progress = true;
-    params.print_timing = true;
+    params.print_progress = options.print_progress;
+    params.print_timing = options.print_timing;
     params.max_audio_tokens = options.max_audio_tokens;
     params.temperature = options.temperature;
     params.top_k = options.top_k;
     params.top_p = options.top_p;
     params.repetition_penalty = options.repetition_penalty;
     params.streaming_generate = true;
-    params.async_streaming_decode = true;
+    params.async_streaming_decode = options.async_streaming_decode;
     params.play_streaming = false;
-    params.prewarm_streaming = true;
-    params.prewarm_frames = 1;
+    params.prewarm_streaming = false;
     params.instruction = options.instruction;
     params.cache_instruction_tokens = options.cache_instruction_tokens;
     params.instruction_cache_key = options.instruction_cache_key;
@@ -158,18 +157,17 @@ bool Qwen3StreamingTts::synthesize_streaming(
     }
 
     qwen3_tts::tts_params params;
-    params.print_progress = true;
-    params.print_timing = true;
+    params.print_progress = options.print_progress;
+    params.print_timing = options.print_timing;
     params.max_audio_tokens = options.max_audio_tokens;
     params.temperature = options.temperature;
     params.top_k = options.top_k;
     params.top_p = options.top_p;
     params.repetition_penalty = options.repetition_penalty;
     params.streaming_generate = true;
-    params.async_streaming_decode = true;
-    params.play_streaming = true;
-    params.prewarm_streaming = true;
-    params.prewarm_frames = 1;
+    params.async_streaming_decode = options.async_streaming_decode;
+    params.play_streaming = options.play_streaming;
+    params.prewarm_streaming = false;
     params.instruction = options.instruction;
     params.cache_instruction_tokens = options.cache_instruction_tokens;
     params.instruction_cache_key = options.instruction_cache_key;
