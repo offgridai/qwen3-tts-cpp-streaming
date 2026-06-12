@@ -577,9 +577,15 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                                                        const tts_params & params,
                                                        tts_result & result) {
     int64_t t_total_start = get_time_ms();
-    fprintf(stderr, "\n[stream] request_accepted wall_ms=0 text_bytes=%zu has_instruction=%s\n",
-            text.size(),
-            params.instruction.empty() ? "no" : "yes");
+    const bool trace_stream_summary = params.print_progress || params.print_timing || params.dump_first_frame_profile;
+    const bool trace_stream_detail = params.print_progress || params.dump_streaming_overlap;
+    const bool trace_callback_detail = params.dump_streaming_overlap;
+
+    if (trace_stream_summary) {
+        fprintf(stderr, "\n[stream] request_accepted wall_ms=0 text_bytes=%zu has_instruction=%s\n",
+                text.size(),
+                params.instruction.empty() ? "no" : "yes");
+    }
     auto sample_memory = [&](const char * stage) {
         process_memory_snapshot mem;
         if (!get_process_memory_snapshot(mem)) {
@@ -835,14 +841,16 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             delivery_state.previous_emit_clock_ms = t_generate_start + wall_ms;
             delivery_state.previous_emit_wall_ms = wall_ms;
             if (params.audio_chunk_callback) {
-                fprintf(stderr,
-                        "[deliver] chunk_index=%d samples=%zu audio_ms=%.1f wall_ms_since_request=%lld wall_ms_since_prev_chunk=%lld final=%s\n",
-                        delivery_state.chunk_index,
-                        count,
-                        audio_ms,
-                        (long long) wall_ms,
-                        (long long) chunk_gap_ms,
-                        is_final ? "yes" : "no");
+                if (trace_callback_detail) {
+                    fprintf(stderr,
+                            "[deliver] chunk_index=%d samples=%zu audio_ms=%.1f wall_ms_since_request=%lld wall_ms_since_prev_chunk=%lld final=%s\n",
+                            delivery_state.chunk_index,
+                            count,
+                            audio_ms,
+                            (long long) wall_ms,
+                            (long long) chunk_gap_ms,
+                            is_final ? "yes" : "no");
+                }
                 if (!params.audio_chunk_callback(chunk, (int32_t) count, sample_rate, is_final)) {
                     delivery_state.error_msg = "Audio chunk callback requested stop";
                     delivery_state.failed = true;
@@ -854,15 +862,17 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                     first_playback_enqueue_ms = wall_ms;
                 }
                 const double queued_before_ms = live_player->queued_audio_ms();
-                fprintf(stderr,
-                        "[stream] player_write chunk_index=%d samples=%zu audio_ms=%.1f wall_ms_since_request=%lld wall_ms_since_prev_window=%lld cumulative_audio_ms=%.1f player_queued_audio_ms(before)=%.1f paced=yes\n",
-                        delivery_state.chunk_index,
-                        count,
-                        audio_ms,
-                        (long long) wall_ms,
-                        (long long) chunk_gap_ms,
-                        qwen3_samples_to_ms((size_t) std::max<int64_t>(0, emitted_audio_samples.load()), sample_rate),
-                        queued_before_ms);
+                if (trace_stream_detail) {
+                    fprintf(stderr,
+                            "[stream] player_write chunk_index=%d samples=%zu audio_ms=%.1f wall_ms_since_request=%lld wall_ms_since_prev_window=%lld cumulative_audio_ms=%.1f player_queued_audio_ms(before)=%.1f paced=yes\n",
+                            delivery_state.chunk_index,
+                            count,
+                            audio_ms,
+                            (long long) wall_ms,
+                            (long long) chunk_gap_ms,
+                            qwen3_samples_to_ms((size_t) std::max<int64_t>(0, emitted_audio_samples.load()), sample_rate),
+                            queued_before_ms);
+                }
                 if (!live_player->write(chunk, count)) {
                     delivery_state.error_msg = live_player->last_error().empty()
                         ? "Live player write failed"
@@ -870,10 +880,12 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                     delivery_state.failed = true;
                     return false;
                 }
-                fprintf(stderr,
-                        "[stream] player_queue_after_write chunk_index=%d player_queued_audio_ms=%.1f paced=yes\n",
-                        delivery_state.chunk_index,
-                        live_player->queued_audio_ms());
+                if (trace_stream_detail) {
+                    fprintf(stderr,
+                            "[stream] player_queue_after_write chunk_index=%d player_queued_audio_ms=%.1f paced=yes\n",
+                            delivery_state.chunk_index,
+                            live_player->queued_audio_ms());
+                }
             }
             ++delivery_state.delivered_chunks;
             ++delivery_state.chunk_index;
@@ -1044,10 +1056,12 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             const int64_t dequeue_ms = get_time_ms() - t_generate_start;
             const int64_t decode_start_ms = get_time_ms();
             if (job.index == 0) {
-                fprintf(stderr, "[stream] first_decode_start wall_ms=%lld queued_ms=%lld local_frames=%d\n",
-                        (long long) decode_start_ms,
-                        (long long) job.queued_ms,
-                        job.local_frames);
+                if (trace_stream_detail) {
+                    fprintf(stderr, "[stream] first_decode_start wall_ms=%lld queued_ms=%lld local_frames=%d\n",
+                            (long long) decode_start_ms,
+                            (long long) job.queued_ms,
+                            job.local_frames);
+                }
             }
             if (!self.audio_decoder_.decode(job.local_codes.data(), job.local_frames, decoded)) {
                 stream_error_msg = "Failed streaming decode: " + self.audio_decoder_.get_error();
@@ -1109,24 +1123,28 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                 if (first_playback_enqueue_ms < 0) {
                     first_playback_enqueue_ms = get_time_ms() - t_generate_start;
                 }
-                fprintf(stderr,
-                        "[stream] player_write window_index=%d samples=%zu audio_ms=%.1f wall_ms_since_request=%lld wall_ms_since_prev_window=%lld cumulative_audio_ms=%.1f player_queued_audio_ms(before)=%.1f paced=no\n",
-                        job.index,
-                        appended_samples,
-                        audio_ms,
-                        (long long) window_ready_ms,
-                        (long long) window_gap_ms,
-                        cumulative_audio_ms,
-                        live_player->queued_audio_ms());
+                if (trace_stream_detail) {
+                    fprintf(stderr,
+                            "[stream] player_write window_index=%d samples=%zu audio_ms=%.1f wall_ms_since_request=%lld wall_ms_since_prev_window=%lld cumulative_audio_ms=%.1f player_queued_audio_ms(before)=%.1f paced=no\n",
+                            job.index,
+                            appended_samples,
+                            audio_ms,
+                            (long long) window_ready_ms,
+                            (long long) window_gap_ms,
+                            cumulative_audio_ms,
+                            live_player->queued_audio_ms());
+                }
                 if (!live_player->write(result.audio, append_offset, appended_samples)) {
                     fprintf(stderr, "Warning: live streaming playback write failed: %s\n",
                             live_player->last_error().c_str());
                     live_player.reset();
                 } else {
-                    fprintf(stderr,
-                            "[stream] player_queue_after_write window_index=%d player_queued_audio_ms=%.1f paced=no\n",
-                            job.index,
-                            live_player->queued_audio_ms());
+                    if (trace_stream_detail) {
+                        fprintf(stderr,
+                                "[stream] player_queue_after_write window_index=%d player_queued_audio_ms=%.1f paced=no\n",
+                                job.index,
+                                live_player->queued_audio_ms());
+                    }
                 }
             }
 
@@ -1150,15 +1168,17 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                             result.sample_rate > 0 ? (1000.0 * (double) result.audio.size() / (double) result.sample_rate) : 0.0);
                 }
             }
-            fprintf(stderr,
-                    "[stream] window_available window_index=%d samples=%zu audio_ms=%.1f wall_ms_since_request=%lld wall_ms_since_prev_window=%lld cumulative_audio_ms=%.1f player_queued_audio_ms=%.1f\n",
-                    job.index,
-                    appended_samples,
-                    audio_ms,
-                    (long long) window_ready_ms,
-                    (long long) window_gap_ms,
-                    cumulative_audio_ms,
-                    live_player ? live_player->queued_audio_ms() : 0.0);
+            if (trace_stream_detail) {
+                fprintf(stderr,
+                        "[stream] window_available window_index=%d samples=%zu audio_ms=%.1f wall_ms_since_request=%lld wall_ms_since_prev_window=%lld cumulative_audio_ms=%.1f player_queued_audio_ms=%.1f\n",
+                        job.index,
+                        appended_samples,
+                        audio_ms,
+                        (long long) window_ready_ms,
+                        (long long) window_gap_ms,
+                        cumulative_audio_ms,
+                        live_player ? live_player->queued_audio_ms() : 0.0);
+            }
 
             prev_window_ready_ms = window_ready_ms;
             last_completed_frame = job.end_frame;
@@ -1368,7 +1388,9 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
         // latency base immediately before the real autoregressive generation begins
         // so first-window queue/PCM/playback numbers measure the actual hot path.
         t_generate_start = get_time_ms();
-        fprintf(stderr, "[stream] hot_request_start wall_ms=0\n");
+        if (trace_stream_summary) {
+            fprintf(stderr, "[stream] hot_request_start wall_ms=0\n");
+        }
         if (live_player) {
             live_player->reset_timing_base(t_generate_start);
         }
@@ -1567,10 +1589,12 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                 format_bytes(result.mem_phys_peak_bytes).c_str());
     }
 
-    fprintf(stderr, "[stream] synthesis_completed wall_ms=%lld success=%s audio_ms=%.1f\n",
-            (long long) result.t_total_ms,
-            result.success ? "yes" : "no",
-            qwen3_samples_to_ms(result.audio.size(), result.sample_rate));
+    if (trace_stream_summary) {
+        fprintf(stderr, "[stream] synthesis_completed wall_ms=%lld success=%s audio_ms=%.1f\n",
+                (long long) result.t_total_ms,
+                result.success ? "yes" : "no",
+                qwen3_samples_to_ms(result.audio.size(), result.sample_rate));
+    }
 
     return result;
 }

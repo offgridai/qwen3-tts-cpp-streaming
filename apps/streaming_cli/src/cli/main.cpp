@@ -455,6 +455,8 @@ private:
         size_t pending_remaining_samples = 0;
         size_t submitted_chunk_samples = 0;
         size_t total_submitted_samples = 0;
+        const size_t coalesce_samples = align_samples(ms_to_samples(sample_rate_, std::max(0, coalesce_ms_)));
+        const size_t max_burst_samples = align_samples(ms_to_samples(sample_rate_, std::max(0, max_burst_ms_)));
         {
             std::lock_guard<std::mutex> lock(mutex_);
             const size_t pending_samples = pending_output_pcm_.size() > pending_output_pcm_read_offset_
@@ -467,7 +469,22 @@ private:
                 return;
             }
 
-            const size_t samples_to_write = pending_samples;
+            size_t samples_to_write = pending_samples;
+            if (playback_started_ && !force_flush_all) {
+                const size_t consumed_samples = get_current_output_playback_samples_unlocked();
+                const size_t submitted_remaining_samples = submitted_output_samples_ > consumed_samples
+                    ? (submitted_output_samples_ - consumed_samples)
+                    : 0;
+                const size_t buffered_total_samples = submitted_remaining_samples + pending_samples;
+                if (coalesce_samples > 0 &&
+                    pending_samples < coalesce_samples &&
+                    buffered_total_samples > maintain_floor_samples_) {
+                    return;
+                }
+                if (max_burst_samples > 0 && samples_to_write > max_burst_samples) {
+                    samples_to_write = max_burst_samples;
+                }
+            }
             submitted_chunk_samples = samples_to_write;
             chunk.assign(pending_output_pcm_.begin() + (ptrdiff_t) pending_output_pcm_read_offset_,
                          pending_output_pcm_.begin() + (ptrdiff_t) (pending_output_pcm_read_offset_ + samples_to_write));
@@ -727,50 +744,60 @@ int main(int argc, char** argv) {
                 options.model_identifier = "qwen3-tts-0.6b-f16";
                 options.live_preroll_ms = 150;
                 options.first_tail_window_frames = 3;
-                options.ramp_tail_window_frames = 5;
-                options.ramp_tail_window_count = 2;
+                options.ramp_tail_window_frames = 6;
+                options.ramp_tail_window_count = 0;
                 options.steady_tail_window_frames = 8;
-                options.context_frames = 3;
-                options.early_context_frames = 2;
+                options.context_frames = 2;
+                options.early_context_frames = 1;
                 options.early_context_window_count = 2;
-                options.final_context_frames = 4;
+                options.final_context_frames = 3;
+                options.paced_audio_delivery = false;
+                options.steady_split_decode_frames = 0;
             } else if (profile == "memory-saver") {
                 options.model_identifier = "qwen3-tts-0.6b-q5_k";
                 options.live_preroll_ms = 1000;
                 options.first_tail_window_frames = 3;
-                options.ramp_tail_window_frames = 5;
-                options.ramp_tail_window_count = 2;
+                options.ramp_tail_window_frames = 6;
+                options.ramp_tail_window_count = 0;
                 options.steady_tail_window_frames = 8;
-                options.context_frames = 3;
-                options.early_context_frames = 2;
+                options.context_frames = 2;
+                options.early_context_frames = 1;
                 options.early_context_window_count = 2;
-                options.final_context_frames = 4;
+                options.final_context_frames = 3;
+                options.paced_audio_delivery = false;
+                options.steady_split_decode_frames = 0;
             } else if (profile == "ultra-low") {
                 options.model_identifier = "qwen3-tts-0.6b-q4_k";
                 options.live_preroll_ms = 2000;
                 options.first_tail_window_frames = 3;
-                options.ramp_tail_window_frames = 5;
-                options.ramp_tail_window_count = 2;
+                options.ramp_tail_window_frames = 6;
+                options.ramp_tail_window_count = 0;
                 options.steady_tail_window_frames = 8;
-                options.context_frames = 3;
-                options.early_context_frames = 2;
+                options.context_frames = 2;
+                options.early_context_frames = 1;
                 options.early_context_window_count = 2;
-                options.final_context_frames = 4;
+                options.final_context_frames = 3;
+                options.paced_audio_delivery = false;
+                options.steady_split_decode_frames = 0;
             } else if (profile == "offgrid-callback") {
                 options.live_preroll_ms = 150;
                 options.first_tail_window_frames = 3;
                 options.ramp_tail_window_frames = 6;
                 options.ramp_tail_window_count = 0;
-                options.steady_tail_window_frames = 12;
-                options.context_frames = 2;
-                options.early_context_frames = 1;
+                options.steady_tail_window_frames = 8;
+                options.context_frames = 3;
+                options.early_context_frames = 2;
                 options.early_context_window_count = 2;
                 options.final_context_frames = 4;
                 options.adaptive_steady_windows = false;
+                options.adaptive_min_tail_window_frames = 6;
+                options.adaptive_low_watermark_ms = 220;
+                options.adaptive_high_watermark_ms = 520;
+                options.paced_audio_delivery = true;
                 options.delivery_chunk_ms = 40;
                 options.delivery_start_buffer_ms = 40;
-                options.delivery_target_lead_ms = 400;
-                options.steady_split_decode_frames = 6;
+                options.delivery_target_lead_ms = 300;
+                options.steady_split_decode_frames = 4;
             } else {
                 std::cerr << "Unknown --tts-profile '" << profile << "'. Expected realtime, memory-saver, ultra-low, or offgrid-callback.\n";
                 return 2;
