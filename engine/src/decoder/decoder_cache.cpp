@@ -7,7 +7,6 @@ namespace qwen3_tts {
 
 void decoder_internal::ops::release_cached_decode_graph(AudioTokenizerDecoder & self) {
     auto & state = self.impl_->state;
-
     state.decode_graph = nullptr;
     state.decode_positions_tensor = nullptr;
     state.decode_audio_tensor = nullptr;

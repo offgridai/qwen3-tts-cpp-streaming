@@ -10,7 +10,6 @@
 #include <functional>
 #include <cstdint>
 #include <unordered_map>
-#include <unordered_set>
 
 namespace qwen3_tts {
 namespace pipeline_internal {
@@ -64,8 +63,8 @@ struct tts_params {
     // After the first window, optionally use a few smaller ramp windows before
     // settling into the steady-state size. This reduces early burstiness while
     // preserving the larger hot-path decode shape for throughput.
-    int32_t ramp_tail_window_frames = 5;
-    int32_t ramp_tail_window_count = 2;
+    int32_t ramp_tail_window_frames = 6;
+    int32_t ramp_tail_window_count = 0;
     int32_t steady_tail_window_frames = 8;
     int32_t context_frames = 3;
     // Optional reduced left-context for early non-final windows. <=0 means
@@ -86,10 +85,10 @@ struct tts_params {
     // WAV is still written normally. On unsupported platforms this is ignored.
     bool play_streaming = true;
 
-    // Experimental: before a streaming request, run a tiny throwaway
-    // transformer/decode pass to build/capture hot graphs and warm CUDA kernels.
-    // This is excluded from reported synthesis timing.
-    bool prewarm_streaming = true;
+    // Deprecated: historical throwaway synth/decode warmup path. This repo now
+    // prefers direct first-request execution plus cheap instruction-token cache
+    // priming over hidden work before real audio starts.
+    bool prewarm_streaming = false;
     int32_t prewarm_frames = 1;
     // Repeat the prewarm pass. Useful for testing whether first-request latency
     // is dominated by first-run graph/kernel/JIT overhead versus steady hot-path cost.
@@ -111,7 +110,7 @@ struct tts_params {
 
     // Adaptive streaming: shrink steady-state decode windows when queued audio
     // is running low, then expand again once playback headroom recovers.
-    bool adaptive_steady_windows = true;
+    bool adaptive_steady_windows = false;
     int32_t adaptive_min_tail_window_frames = 6;
     int32_t adaptive_low_watermark_ms = 220;
     int32_t adaptive_high_watermark_ms = 520;
@@ -123,11 +122,11 @@ struct tts_params {
     // Optional paced delivery: keep coarse decode windows for throughput, but
     // emit smaller audio chunks to downstream consumers and live playback.
     bool paced_audio_delivery = true;
-    int32_t delivery_chunk_ms = 80;
-    int32_t delivery_start_buffer_ms = 80;
-    int32_t delivery_target_lead_ms = 240;
+    int32_t delivery_chunk_ms = 40;
+    int32_t delivery_start_buffer_ms = 40;
+    int32_t delivery_target_lead_ms = 300;
     bool paced_live_playback = false;
-    int32_t steady_split_decode_frames = 0;
+    int32_t steady_split_decode_frames = 4;
     std::function<bool(const float * samples, int32_t n_samples, int32_t sample_rate, bool is_final)> audio_chunk_callback;
 };
 
@@ -227,7 +226,8 @@ public:
     bool prime_instruction_cache(const std::string & instruction,
                                  const std::string & cache_key = "");
 
-    // Run a hidden throwaway synthesis once for a fixed voice/instruction profile.
+    // Prime cheap reusable state for a fixed voice/instruction profile. This no
+    // longer runs a hidden synthesis; it only retains tokenized instructions.
     bool warm_voice_profile(const std::string & warmup_text,
                             const tts_params & params = tts_params());
     
@@ -262,7 +262,6 @@ private:
     std::string decoder_model_path_;
     tts_progress_callback_t progress_callback_;
     std::unordered_map<std::string, std::vector<int32_t>> instruction_token_cache_;
-    std::unordered_set<std::string> warmed_voice_profiles_;
 };
 
 // Utility: Load audio file (WAV format)

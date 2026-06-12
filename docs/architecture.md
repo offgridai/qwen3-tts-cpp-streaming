@@ -95,17 +95,18 @@ The current low-latency path is built around:
 Current default startup/steady policy:
 
 - `first_tail_window_frames=3`
-- `ramp_tail_window_frames=5`
-- `ramp_tail_window_count=2`
+- `ramp_tail_window_frames=6`
+- `ramp_tail_window_count=0`
 - `steady_tail_window_frames=8`
 - `context_frames=3`
 - `early_context_frames=2`
 - `early_context_window_count=2`
-- `adaptive_steady_windows=on`
+- `adaptive_steady_windows=off`
 - `adaptive_min_tail_window_frames=6`
-- `delivery_chunk_ms=80`
-- `delivery_start_buffer_ms=80`
-- `delivery_target_lead_ms=240`
+- `delivery_chunk_ms=40`
+- `delivery_start_buffer_ms=40`
+- `delivery_target_lead_ms=300`
+- `steady_split_decode_frames=4`
 
 These defaults are a balanced standalone profile. They work well for the built-in local player and remain a reasonable baseline for integrations, but they are not the most aggressive callback-oriented settings.
 
@@ -119,6 +120,7 @@ For callback-driven consumers such as Offgrid/LineCoach, the CLI now exposes an 
 - `early_context_frames=2`
 - `early_context_window_count=2`
 - `final_context_frames=4`
+- `adaptive_steady_windows=off`
 - `delivery_chunk_ms=40`
 - `delivery_start_buffer_ms=40`
 - `delivery_target_lead_ms=300`

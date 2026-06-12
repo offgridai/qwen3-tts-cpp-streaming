@@ -730,210 +730,8 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             adaptive_low_watermark_ms,
             params.adaptive_high_watermark_ms > 0 ? params.adaptive_high_watermark_ms : adaptive_low_watermark_ms);
 
-        if (params.prewarm_streaming) {
-            const int64_t prewarm_start_ms = get_time_ms();
-            const int32_t warm_frames = std::max<int32_t>(clamp_positive(params.prewarm_frames, 1), first_window);
-            int64_t warm_generate_ms_total = 0;
-            int64_t warm_decode_ms_total = 0;
-            int32_t warm_ok_count = 0;
-
-            for (int32_t repeat = 0; repeat < std::max<int32_t>(1, params.prewarm_repeats); ++repeat) {
-                const int64_t repeat_start_ms = get_time_ms();
-                std::vector<int32_t> warm_codes;
-                auto warm_on_frame = [&](const std::vector<int32_t> &, int32_t, bool) -> bool { return true; };
-
-                self.transformer_.clear_kv_cache();
-                const int64_t warm_generate_start_ms = get_time_ms();
-                bool warm_generate_ok = self.transformer_.generate_streaming(
-                    text_tokens.data(), (int32_t) text_tokens.size(),
-                    speaker_embedding, warm_frames, warm_codes, warm_on_frame,
-                    params.language_id, params.repetition_penalty,
-                    params.temperature, params.top_k,
-                    instruct_tokens.empty() ? nullptr : instruct_tokens.data(),
-                    (int32_t) instruct_tokens.size());
-                warm_generate_ms_total += get_time_ms() - warm_generate_start_ms;
-
-                int64_t warm_decode_ms = 0;
-                if (warm_generate_ok) {
-                    ++warm_ok_count;
-                    std::vector<float> warm_audio;
-                    const int32_t warm_code_frames = (int32_t) (warm_codes.size() / (size_t) n_codebooks);
-
-                    // Warm the exact first streaming decode shape. If the throwaway
-                    // generation did not produce enough frames for any reason, fall
-                    // back to dummy codes so the graph/cache shape is still touched.
-                    if (params.prewarm_first_decode && first_window > 0) {
-                        std::vector<int32_t> first_codes;
-                        const int32_t first_local_frames = first_window;
-                        if (warm_code_frames >= first_local_frames) {
-                            first_codes.assign(warm_codes.begin(),
-                                               warm_codes.begin() + (size_t) first_local_frames * n_codebooks);
-                        } else {
-                            first_codes.assign((size_t) first_local_frames * (size_t) n_codebooks, 0);
-                        }
-                        const int64_t decode_start_ms = get_time_ms();
-                        if (!self.audio_decoder_.decode(first_codes.data(), first_local_frames, warm_audio)) {
-                            if (params.print_progress) {
-                                fprintf(stderr, "Warning: first-window decoder prewarm failed: %s\n",
-                                        self.audio_decoder_.get_error().c_str());
-                            }
-                        }
-                        warm_decode_ms += get_time_ms() - decode_start_ms;
-                    }
-
-                    // Warm the optional early ramp decode shape. This targets the
-                    // low-latency follow-up windows immediately after first audio.
-                    if (ramp_window_count > 0) {
-                        const int32_t ramp_local_frames = context_frames + ramp_window;
-                        if (ramp_local_frames > 0) {
-                            std::vector<int32_t> ramp_codes((size_t) ramp_local_frames * (size_t) n_codebooks, 0);
-                            if (warm_code_frames >= ramp_local_frames) {
-                                ramp_codes.assign(warm_codes.begin(),
-                                                  warm_codes.begin() + (size_t) ramp_local_frames * n_codebooks);
-                            }
-                            const int64_t decode_start_ms = get_time_ms();
-                            if (!self.audio_decoder_.decode(ramp_codes.data(), ramp_local_frames, warm_audio)) {
-                                if (params.print_progress) {
-                                    fprintf(stderr, "Warning: ramp-window decoder prewarm failed: %s\n",
-                                            self.audio_decoder_.get_error().c_str());
-                                }
-                            }
-                            warm_decode_ms += get_time_ms() - decode_start_ms;
-                        }
-                    }
-
-                    // Warm the common steady tail-context local graph size:
-                    // context + steady_window. This is the hot steady-state shape.
-                    if (params.prewarm_steady_decode) {
-                        const int32_t steady_local_frames = context_frames + steady_window;
-                        if (steady_local_frames > 0) {
-                            std::vector<int32_t> steady_codes((size_t) steady_local_frames * (size_t) n_codebooks, 0);
-                            if (warm_code_frames >= steady_local_frames) {
-                                steady_codes.assign(warm_codes.begin(),
-                                                    warm_codes.begin() + (size_t) steady_local_frames * n_codebooks);
-                            }
-                            const int64_t decode_start_ms = get_time_ms();
-                            if (!self.audio_decoder_.decode(steady_codes.data(), steady_local_frames, warm_audio)) {
-                                if (params.print_progress) {
-                                    fprintf(stderr, "Warning: steady-window decoder prewarm failed: %s\n",
-                                            self.audio_decoder_.get_error().c_str());
-                                }
-                            }
-                            warm_decode_ms += get_time_ms() - decode_start_ms;
-                        }
-
-                        if (early_context_window_count > 0 && early_context_frames != context_frames) {
-                            const int32_t early_local_frames = early_context_frames + steady_window;
-                            if (early_local_frames > 0) {
-                                std::vector<int32_t> early_codes((size_t) early_local_frames * (size_t) n_codebooks, 0);
-                                if (warm_code_frames >= early_local_frames) {
-                                    early_codes.assign(warm_codes.begin(),
-                                                       warm_codes.begin() + (size_t) early_local_frames * n_codebooks);
-                                }
-                                const int64_t decode_start_ms = get_time_ms();
-                                if (!self.audio_decoder_.decode(early_codes.data(), early_local_frames, warm_audio)) {
-                                    if (params.print_progress) {
-                                        fprintf(stderr, "Warning: early-context decoder prewarm failed: %s\n",
-                                                self.audio_decoder_.get_error().c_str());
-                                    }
-                                }
-                                warm_decode_ms += get_time_ms() - decode_start_ms;
-                            }
-                        }
-
-                        if (adaptive_windows && adaptive_min_window < steady_window) {
-                            const int32_t adaptive_local_frames = context_frames + adaptive_min_window;
-                            if (adaptive_local_frames > 0) {
-                                std::vector<int32_t> adaptive_codes((size_t) adaptive_local_frames * (size_t) n_codebooks, 0);
-                                if (warm_code_frames >= adaptive_local_frames) {
-                                    adaptive_codes.assign(warm_codes.begin(),
-                                                          warm_codes.begin() + (size_t) adaptive_local_frames * n_codebooks);
-                                }
-                                const int64_t decode_start_ms = get_time_ms();
-                                if (!self.audio_decoder_.decode(adaptive_codes.data(), adaptive_local_frames, warm_audio)) {
-                                    if (params.print_progress) {
-                                        fprintf(stderr, "Warning: adaptive-window decoder prewarm failed: %s\n",
-                                                self.audio_decoder_.get_error().c_str());
-                                    }
-                                }
-                                warm_decode_ms += get_time_ms() - decode_start_ms;
-                            }
-                        }
-
-                        if (steady_split_decode_frames > 0 && steady_split_decode_frames < steady_window) {
-                            const int32_t split_local_frames = context_frames + steady_split_decode_frames;
-                            if (split_local_frames > 0) {
-                                std::vector<int32_t> split_codes((size_t) split_local_frames * (size_t) n_codebooks, 0);
-                                if (warm_code_frames >= split_local_frames) {
-                                    split_codes.assign(warm_codes.begin(),
-                                                       warm_codes.begin() + (size_t) split_local_frames * n_codebooks);
-                                }
-                                const int64_t decode_start_ms = get_time_ms();
-                                if (!self.audio_decoder_.decode(split_codes.data(), split_local_frames, warm_audio)) {
-                                    if (params.print_progress) {
-                                        fprintf(stderr, "Warning: split-window decoder prewarm failed: %s\n",
-                                                self.audio_decoder_.get_error().c_str());
-                                    }
-                                }
-                                warm_decode_ms += get_time_ms() - decode_start_ms;
-                            }
-                        }
-                    }
-
-                    // Optional: warm the final-context graph too. This is not expected
-                    // to help first audio, but is useful for measuring tail-cutoff fixes
-                    // without adding a first-use penalty at stream end.
-                    if (params.prewarm_final_decode) {
-                        const int32_t final_local_frames = final_context_frames + steady_window;
-                        if (final_local_frames > 0) {
-                            std::vector<int32_t> final_codes((size_t) final_local_frames * (size_t) n_codebooks, 0);
-                            if (warm_code_frames >= final_local_frames) {
-                                final_codes.assign(warm_codes.begin(),
-                                                   warm_codes.begin() + (size_t) final_local_frames * n_codebooks);
-                            }
-                            const int64_t decode_start_ms = get_time_ms();
-                            if (!self.audio_decoder_.decode(final_codes.data(), final_local_frames, warm_audio)) {
-                                if (params.print_progress) {
-                                    fprintf(stderr, "Warning: final-window decoder prewarm failed: %s\n",
-                                            self.audio_decoder_.get_error().c_str());
-                                }
-                            }
-                            warm_decode_ms += get_time_ms() - decode_start_ms;
-                        }
-                    }
-                } else if (params.print_progress) {
-                    fprintf(stderr, "Warning: streaming transformer prewarm failed: %s\n",
-                            self.transformer_.get_error().c_str());
-                }
-
-                warm_decode_ms_total += warm_decode_ms;
-                if (params.print_progress && params.prewarm_repeats > 1) {
-                    fprintf(stderr, "Streaming prewarm repeat %d/%d: generate=%lld ms decode=%lld ms total=%lld ms\n",
-                            repeat + 1,
-                            std::max<int32_t>(1, params.prewarm_repeats),
-                            (long long) (get_time_ms() - repeat_start_ms - warm_decode_ms),
-                            (long long) warm_decode_ms,
-                            (long long) (get_time_ms() - repeat_start_ms));
-                }
-            }
-
-            const int64_t prewarm_total_ms = get_time_ms() - prewarm_start_ms;
-            excluded_timing_ms += prewarm_total_ms;
-
-            self.transformer_.clear_kv_cache();
-            // Reset the real streaming timer after prewarm. Prewarm is intended to
-            // happen at conversation/session start and is excluded from request timing.
-            t_generate_start = get_time_ms();
-
-            if (params.print_progress) {
-                fprintf(stderr,
-                        "Streaming prewarm: repeats=%d ok=%d generate=%lld ms decode=%lld ms total=%lld ms (excluded)\n",
-                        std::max<int32_t>(1, params.prewarm_repeats),
-                        warm_ok_count,
-                        (long long) warm_generate_ms_total,
-                        (long long) warm_decode_ms_total,
-                        (long long) prewarm_total_ms);
-            }
+        if (params.prewarm_streaming && params.print_progress) {
+            fprintf(stderr, "Streaming prewarm requested but ignored in simple-and-fast mode\n");
         }
 
         int32_t last_enqueued_frame = 0;
@@ -1133,7 +931,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                                     break;
                                 }
 
-                                if (available < delivery_chunk_samples) {
+                                if (available < effective_delivery_start_buffer_samples) {
                                     if (delivery_state.finalized) {
                                         emit_count = available;
                                         break;
@@ -1147,16 +945,17 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                                 const size_t emitted_ahead_samples = delivery_state.emitted_samples > elapsed_samples
                                     ? (delivery_state.emitted_samples - elapsed_samples)
                                     : 0;
-                                const size_t post_emit_ahead_samples = emitted_ahead_samples + delivery_chunk_samples;
                                 const int64_t burst_due_ms = delivery_state.previous_emit_clock_ms >= 0
                                     ? (delivery_state.previous_emit_clock_ms + callback_burst_gap_ms)
                                     : now_ms;
-                                const bool can_burst_to_target =
-                                    post_emit_ahead_samples <= delivery_target_lead_samples &&
-                                    now_ms >= burst_due_ms;
+                                const size_t callback_refill_target_samples =
+                                    std::max(delivery_chunk_samples, delivery_target_lead_samples);
+                                const size_t refill_needed_samples = emitted_ahead_samples >= callback_refill_target_samples
+                                    ? delivery_chunk_samples
+                                    : std::max(delivery_chunk_samples, callback_refill_target_samples - emitted_ahead_samples);
 
-                                if (can_burst_to_target) {
-                                    emit_count = delivery_chunk_samples;
+                                if (now_ms >= burst_due_ms) {
+                                    emit_count = std::min(available, refill_needed_samples);
                                     delivery_state.next_emit_due_ms = std::max<int64_t>(
                                         delivery_state.next_emit_due_ms,
                                         now_ms + callback_burst_gap_ms);
@@ -1170,10 +969,10 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                                     continue;
                                 }
 
-                                emit_count = delivery_chunk_samples;
+                                emit_count = std::min(available, refill_needed_samples);
                                 delivery_state.next_emit_due_ms = std::max<int64_t>(
-                                    delivery_state.next_emit_due_ms + delivery_chunk_interval_ms,
-                                    now_ms + delivery_chunk_interval_ms);
+                                    delivery_state.next_emit_due_ms + callback_burst_gap_ms,
+                                    now_ms + callback_burst_gap_ms);
                                 break;
                             }
 

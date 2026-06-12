@@ -35,39 +35,17 @@ bool Qwen3TTS::prime_instruction_cache(const std::string & instruction,
 
 bool Qwen3TTS::warm_voice_profile(const std::string & warmup_text,
                                   const tts_params & params) {
-    const std::string profile_key = !params.voice_profile_key.empty()
-        ? params.voice_profile_key
-        : (!params.instruction_cache_key.empty() ? params.instruction_cache_key : params.instruction);
+    (void) warmup_text;
 
-    if (!profile_key.empty() && warmed_voice_profiles_.find(profile_key) != warmed_voice_profiles_.end()) {
+    if (params.instruction.empty()) {
         error_msg_.clear();
         return true;
     }
 
-    tts_params warm_params = params;
-    warm_params.print_progress = false;
-    warm_params.print_timing = false;
-    warm_params.play_streaming = false;
-    warm_params.audio_chunk_callback = nullptr;
-    warm_params.dump_first_frame_profile = false;
-    warm_params.dump_streaming_overlap = false;
-    warm_params.max_audio_tokens = warm_params.max_audio_tokens > 0
-        ? std::min<int32_t>(warm_params.max_audio_tokens, 64)
-        : 64;
-    warm_params.cache_instruction_tokens = true;
-
-    const std::string effective_text = warmup_text.empty() ? "Hello." : warmup_text;
-    tts_result result = synthesize(effective_text, warm_params);
-    if (!result.success) {
-        error_msg_ = result.error_msg.empty() ? "Voice profile warmup failed" : result.error_msg;
-        return false;
-    }
-
-    if (!profile_key.empty()) {
-        warmed_voice_profiles_.insert(profile_key);
-    }
-    error_msg_.clear();
-    return true;
+    const std::string profile_key = !params.voice_profile_key.empty()
+        ? params.voice_profile_key
+        : (!params.instruction_cache_key.empty() ? params.instruction_cache_key : params.instruction);
+    return prime_instruction_cache(params.instruction, profile_key);
 }
 
 } // namespace qwen3_tts
