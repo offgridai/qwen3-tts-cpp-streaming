@@ -1168,8 +1168,8 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             const double hidden_norm = std::sqrt(std::max(1e-12, hidden_sum_sq));
 
             const int32_t previous_anchor = std::max(0, std::min(text_content_token_count - 1, (int32_t) std::floor(last_text_progress_index)));
-            const int32_t candidate_start = std::max(0, previous_anchor - 1);
-            const int32_t candidate_end = std::min(text_content_token_count - 1, previous_anchor + 3);
+            const int32_t candidate_start = std::max(0, previous_anchor - 2);
+            const int32_t candidate_end = std::min(text_content_token_count - 1, previous_anchor + 8);
 
             std::vector<double> scores;
             scores.reserve((size_t) (candidate_end - candidate_start + 1));
@@ -1182,10 +1182,11 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                 }
                 double cosine = dot / (hidden_norm * (double) text_content_proj_norms[(size_t) token_index]);
                 if (token_index < previous_anchor) {
-                    cosine -= 0.20;
+                    cosine -= 0.12;
                 }
-                const double distance_penalty = 0.03 * (double) (token_index - previous_anchor);
-                cosine -= std::max(0.0, distance_penalty);
+                const double forward_distance = (double) std::max(0, token_index - previous_anchor);
+                const double distance_penalty = 0.008 * forward_distance;
+                cosine -= distance_penalty;
                 scores.push_back(cosine);
                 if (cosine > max_score) {
                     max_score = cosine;
@@ -1216,15 +1217,24 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             }
 
             const double centroid_index = weighted_index / sum_weight;
-            const double smoothed_index = std::max(
-                last_text_progress_index,
-                std::min((double) (text_content_token_count - 1),
-                         last_text_progress_index * 0.55 + centroid_index * 0.45));
-            last_text_progress_index = smoothed_index;
-
             const double peak_prob = best_weight / sum_weight;
             const double second_prob = second_best_weight > 0.0 ? (second_best_weight / sum_weight) : 0.0;
             const double confidence = std::clamp(0.15 + 0.85 * (peak_prob - second_prob), 0.0, 1.0);
+            const double direct_index = (double) (candidate_start + best_local_index);
+            const double forward_span = (double) std::max(1, candidate_end - previous_anchor);
+            const double progress_toward_frontier = std::clamp(
+                (centroid_index - last_text_progress_index) / forward_span,
+                0.0,
+                1.0);
+            const double blend = std::clamp(0.35 + 0.40 * confidence + 0.25 * progress_toward_frontier, 0.35, 0.95);
+            const double blended_target =
+                centroid_index * (0.65 + 0.20 * confidence) +
+                direct_index * (0.35 - 0.10 * confidence);
+            const double smoothed_index = std::max(
+                last_text_progress_index,
+                std::min((double) (text_content_token_count - 1),
+                         last_text_progress_index * (1.0 - blend) + blended_target * blend));
+            last_text_progress_index = smoothed_index;
 
             estimate.progress = text_content_token_count > 1
                 ? std::clamp(smoothed_index / (double) (text_content_token_count - 1), 0.0, 1.0)
@@ -1257,13 +1267,12 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             estimate.start = frame_text_progress[(size_t) start_index];
             estimate.end = frame_text_progress[(size_t) end_index];
             if (count > 0) {
-                estimate.end.progress = std::max(estimate.end.progress, sum_progress / (double) count);
-                estimate.end.token_index_estimate = std::max(
-                    estimate.end.token_index_estimate,
-                    estimate.start.token_index_estimate);
                 estimate.mean_confidence = sum_confidence / (double) count;
                 estimate.start.confidence = std::max(estimate.start.confidence, (float) estimate.mean_confidence);
                 estimate.end.confidence = std::max(estimate.end.confidence, (float) estimate.mean_confidence);
+                if (estimate.mean_confidence < 0.45) {
+                    estimate.end.progress = std::max(estimate.end.progress, sum_progress / (double) count);
+                }
             }
             estimate.start.progress = std::min(estimate.start.progress, estimate.end.progress);
             estimate.start.token_index_estimate = std::min(
