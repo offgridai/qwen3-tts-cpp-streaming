@@ -18,7 +18,7 @@ engine C++ API
     ->
 tokenizer + optional instruction/speaker conditioning + transformer + vocoder
     ->
-24 kHz mono PCM
+24 kHz mono PCM + optional streaming hint metadata
     ->
 live playback and/or WAV output
 ```
@@ -51,6 +51,7 @@ Owns:
 - autoregressive speech-code generation
 - streaming decode policy
 - paced PCM delivery
+- streaming hint-track emission
 - optional live playback
 - engine CLI
 
@@ -63,6 +64,7 @@ Owns:
 - wrapper defaults for streaming experiments
 - VoiceDesign-specific UX checks
 - chunk callback wiring for integration-style tests
+- wrapper-side hint metadata transport
 
 ## Important Structural Decision
 
@@ -91,6 +93,27 @@ The current low-latency path is built around:
 - reduced early left-context
 - adaptive steady windows when queue depth falls
 - paced PCM delivery for downstream consumers
+
+The same streaming path now also supports an optional hint track intended for
+downstream runtime timing systems.
+
+The hint track is deliberately non-linguistic. It carries:
+
+- stream header metadata such as sample rate, model type, and conditioning presence
+- exact emitted sample ranges
+- codec-frame provenance for each emitted chunk
+- cheap PCM-derived evidence such as RMS, peak, and zero-crossing rate
+- a heuristic energy class: `unknown`, `silence`, `speech_like`, or `burst_like`
+
+The hint track does not attempt to provide:
+
+- words
+- phonemes
+- visemes
+- forced alignment
+- final lipsync timings
+
+Those belong in downstream systems that sit above the TTS engine.
 
 Current default startup/steady policy:
 
@@ -127,6 +150,25 @@ For callback-driven consumers such as Offgrid/LineCoach, the CLI now exposes an 
 - `steady_split_decode_frames=4`
 
 That profile is intended for clients that maintain their own playback queue and want smaller callback arrivals. It is not recommended for the standalone CLI live player, which performs better with the balanced default profile.
+
+## Hint Track Semantics
+
+The current hint payload is aligned to emitted audio chunks, not to a separate
+phonetic or linguistic timeline.
+
+Important conventions:
+
+- `audio_sample_start` and `audio_sample_end` refer to absolute emitted sample positions
+- `audio_sample_end` is exclusive
+- `audio_start_sec` and `audio_end_sec` are derived directly from those sample offsets
+- `codec_frame_start` and `codec_frame_end` describe the generated codec-frame interval
+  that contributed newly emitted audio to the chunk
+- `is_paced_chunk=true` means the chunk came from paced subchunk delivery rather than
+  a single direct decode-window emission
+
+Because the engine supports overlap trimming and paced subchunk slicing, a single
+callback chunk is not guaranteed to correspond one-to-one with a single codec frame.
+Frame provenance is therefore expressed as a range.
 
 ## VoiceDesign Support
 

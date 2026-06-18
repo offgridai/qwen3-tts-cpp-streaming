@@ -4,6 +4,8 @@
 
 #include <filesystem>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -28,6 +30,38 @@ std::string NormalizeModelName(std::string model_identifier) {
         model_identifier += ".gguf";
     }
     return model_identifier;
+}
+
+TtsHintEnergyClass ConvertEnergyClass(qwen3_tts::tts_hint_energy_class value) {
+    switch (value) {
+    case qwen3_tts::tts_hint_energy_class::silence:
+        return TtsHintEnergyClass::silence;
+    case qwen3_tts::tts_hint_energy_class::speech_like:
+        return TtsHintEnergyClass::speech_like;
+    case qwen3_tts::tts_hint_energy_class::burst_like:
+        return TtsHintEnergyClass::burst_like;
+    case qwen3_tts::tts_hint_energy_class::unknown:
+    default:
+        return TtsHintEnergyClass::unknown;
+    }
+}
+
+TtsStreamHintChunk ConvertHintChunk(const qwen3_tts::tts_stream_hint_chunk & chunk) {
+    TtsStreamHintChunk out;
+    out.chunk_index = chunk.chunk_index;
+    out.codec_frame_start = chunk.codec_frame_start;
+    out.codec_frame_end = chunk.codec_frame_end;
+    out.audio_sample_start = chunk.audio_sample_start;
+    out.audio_sample_end = chunk.audio_sample_end;
+    out.audio_start_sec = chunk.audio_start_sec;
+    out.audio_end_sec = chunk.audio_end_sec;
+    out.rms_energy = chunk.rms_energy;
+    out.peak_energy = chunk.peak_energy;
+    out.zero_crossing_rate = chunk.zero_crossing_rate;
+    out.energy_class = ConvertEnergyClass(chunk.energy_class);
+    out.is_paced_chunk = chunk.is_paced_chunk;
+    out.is_final = chunk.is_final;
+    return out;
 }
 
 } // namespace
@@ -115,6 +149,17 @@ bool Qwen3StreamingTts::warm_voice_profile(const TtsStreamOptions& options) {
     params.steady_split_decode_frames = options.steady_split_decode_frames;
     params.dump_first_frame_profile = false;
     params.dump_streaming_overlap = false;
+    if (options.hint_header_callback) {
+        params.stream_hint_header_callback =
+            [on_hint_header = options.hint_header_callback](const qwen3_tts::tts_stream_hint_header & header) {
+                TtsStreamHintHeader out;
+                out.sample_rate = header.sample_rate;
+                out.model_type = header.model_type;
+                out.has_instruction = header.has_instruction;
+                out.has_speaker_conditioning = header.has_speaker_conditioning;
+                on_hint_header(out);
+            };
+    }
 
     return impl_->engine.warm_voice_profile(options.warmup_text, params);
 }
@@ -193,12 +238,41 @@ bool Qwen3StreamingTts::synthesize_streaming(
     params.steady_split_decode_frames = options.steady_split_decode_frames;
     params.dump_first_frame_profile = options.dump_first_frame_profile;
     params.dump_streaming_overlap = options.dump_streaming_overlap;
+    if (options.hint_header_callback) {
+        params.stream_hint_header_callback =
+            [on_hint_header = options.hint_header_callback](const qwen3_tts::tts_stream_hint_header & header) {
+                TtsStreamHintHeader out;
+                out.sample_rate = header.sample_rate;
+                out.model_type = header.model_type;
+                out.has_instruction = header.has_instruction;
+                out.has_speaker_conditioning = header.has_speaker_conditioning;
+                on_hint_header(out);
+            };
+    }
     if (on_chunk) {
+        auto pending_hint_mutex = std::make_shared<std::mutex>();
+        auto pending_hint = std::make_shared<TtsStreamHintChunk>();
+        auto pending_hint_valid = std::make_shared<bool>(false);
+        params.stream_hint_chunk_callback =
+            [pending_hint_mutex, pending_hint, pending_hint_valid](const qwen3_tts::tts_stream_hint_chunk & hint) -> bool {
+                std::lock_guard<std::mutex> lock(*pending_hint_mutex);
+                *pending_hint = ConvertHintChunk(hint);
+                *pending_hint_valid = true;
+                return true;
+            };
         params.audio_chunk_callback =
-            [on_chunk](const float* samples, int32_t n_samples, int32_t sample_rate, bool is_final) -> bool {
+            [on_chunk, pending_hint_mutex, pending_hint, pending_hint_valid](const float* samples, int32_t n_samples, int32_t sample_rate, bool is_final) -> bool {
                 TtsStreamChunk chunk;
                 chunk.sample_rate = sample_rate;
                 chunk.is_final = is_final;
+                {
+                    std::lock_guard<std::mutex> lock(*pending_hint_mutex);
+                    if (*pending_hint_valid) {
+                        chunk.has_hint = true;
+                        chunk.hint = *pending_hint;
+                        *pending_hint_valid = false;
+                    }
+                }
                 if (samples && n_samples > 0) {
                     chunk.samples.assign(samples, samples + n_samples);
                 }
@@ -232,10 +306,6 @@ bool Qwen3StreamingTts::synthesize_streaming(
     if (!qwen3_tts::save_audio_file(output_wav.string(), result.audio, result.sample_rate)) {
         std::cerr << "Failed to write output WAV: " << output_wav.string() << "\n";
         return false;
-    }
-
-    if (on_chunk && !params.paced_audio_delivery) {
-        on_chunk(TtsStreamChunk{result.audio, result.sample_rate, true});
     }
 
     return true;

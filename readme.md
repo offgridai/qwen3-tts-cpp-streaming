@@ -27,6 +27,7 @@ This workspace is primarily for:
 - streaming decode and pacing work
 - VoiceDesign testing
 - validating callback-driven streaming behavior before integrating into another product
+- exposing streaming hint metadata for downstream timing/lipsync systems
 
 The most useful artifact for downstream integration work is usually `qwen3_streaming_cli`, because it exercises the same engine path while exposing streaming-oriented controls and diagnostics.
 
@@ -152,6 +153,63 @@ If you want callback-style diagnostics without caring about the streamed samples
 ```powershell
 --simulate-stream-callback --dump-streaming-overlap
 ```
+
+## Streaming Hint Track
+
+The engine and wrapper now support a lightweight streaming hint track alongside
+normal PCM chunk callbacks.
+
+The Qwen-side hint track is intentionally limited to information the engine can
+observe directly during synthesis:
+
+- exact streamed sample ranges
+- codec-frame provenance for emitted chunks
+- model/runtime conditioning metadata
+- cheap PCM-derived evidence such as RMS, peak energy, and zero-crossing rate
+
+The engine does not attempt to emit:
+
+- word ownership
+- phoneme counts
+- viseme ownership
+- predicted word timestamps
+- final lipsync timing
+
+That linguistic layer belongs in the downstream consumer.
+
+Wrapper-facing types live in:
+
+- `apps/streaming_cli/include/offgrid_tts/Qwen3StreamingTts.h`
+
+Main additions:
+
+- `TtsStreamHintHeader`
+- `TtsStreamHintChunk`
+- `TtsHintEnergyClass`
+
+`TtsStreamOptions::hint_header_callback` fires before the first streamed audio
+chunk. Per-chunk hint metadata is attached to `TtsStreamChunk` via:
+
+- `has_hint`
+- `hint`
+
+Current hint chunk fields:
+
+- `chunk_index`
+- `codec_frame_start`
+- `codec_frame_end`
+- `audio_sample_start`
+- `audio_sample_end`
+- `audio_start_sec`
+- `audio_end_sec`
+- `rms_energy`
+- `peak_energy`
+- `zero_crossing_rate`
+- `energy_class`
+- `is_paced_chunk`
+- `is_final`
+
+`audio_sample_end` and `audio_end_sec` use exclusive-end semantics.
 
 ## Current Streaming Defaults
 

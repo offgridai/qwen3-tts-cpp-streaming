@@ -8,6 +8,7 @@ It owns:
 - speaker encoding
 - transformer inference
 - streaming decode
+- streaming hint-track emission
 - live playback
 - WAV output
 - deterministic tests and model tooling
@@ -64,6 +65,51 @@ engine\build\Release\tts_engine_cli.exe `
   -t "This is generated directly by the engine." `
   -o examples\engine_clone.wav
 ```
+
+## Streaming Hint Track
+
+The engine now exposes optional streaming hint callbacks through
+`engine/src/qwen3_tts.h`.
+
+Primary types:
+
+- `tts_stream_hint_header`
+- `tts_stream_hint_chunk`
+- `tts_hint_energy_class`
+
+Primary callbacks on `tts_params`:
+
+- `stream_hint_header_callback`
+- `stream_hint_chunk_callback`
+
+The header callback fires before the first streamed audio chunk and exposes:
+
+- `sample_rate`
+- `model_type`
+- `has_instruction`
+- `has_speaker_conditioning`
+
+The chunk callback exposes:
+
+- `chunk_index`
+- `codec_frame_start`
+- `codec_frame_end`
+- `audio_sample_start`
+- `audio_sample_end`
+- `audio_start_sec`
+- `audio_end_sec`
+- `rms_energy`
+- `peak_energy`
+- `zero_crossing_rate`
+- `energy_class`
+- `is_paced_chunk`
+- `is_final`
+
+Scope note:
+
+- this is a timing/provenance track, not a linguistic alignment layer
+- the engine does not emit words, phonemes, visemes, or final lipsync timings
+- `audio_sample_end` and `audio_end_sec` are exclusive-end
 
 ## Layout
 

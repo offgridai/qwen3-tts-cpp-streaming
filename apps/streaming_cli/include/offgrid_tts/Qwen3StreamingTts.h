@@ -5,10 +5,42 @@
 #include <string>
 #include <vector>
 
+enum class TtsHintEnergyClass : uint8_t {
+    unknown = 0,
+    silence = 1,
+    speech_like = 2,
+    burst_like = 3,
+};
+
+struct TtsStreamHintHeader {
+    int32_t sample_rate = 24000;
+    std::string model_type;
+    bool has_instruction = false;
+    bool has_speaker_conditioning = false;
+};
+
+struct TtsStreamHintChunk {
+    int32_t chunk_index = 0;
+    int32_t codec_frame_start = 0;
+    int32_t codec_frame_end = 0;
+    int64_t audio_sample_start = 0;
+    int64_t audio_sample_end = 0;
+    double audio_start_sec = 0.0;
+    double audio_end_sec = 0.0;
+    float rms_energy = 0.0f;
+    float peak_energy = 0.0f;
+    float zero_crossing_rate = 0.0f;
+    TtsHintEnergyClass energy_class = TtsHintEnergyClass::unknown;
+    bool is_paced_chunk = false;
+    bool is_final = false;
+};
+
 struct TtsStreamChunk {
     std::vector<float> samples;
     int32_t sample_rate = 24000;
     bool is_final = false;
+    bool has_hint = false;
+    TtsStreamHintChunk hint;
 };
 
 struct TtsStreamOptions {
@@ -51,6 +83,7 @@ struct TtsStreamOptions {
     bool warm_voice_profile = false;
     std::string warm_voice_profile_key;
     std::string warmup_text = "Hello.";
+    std::function<void(const TtsStreamHintHeader&)> hint_header_callback;
 };
 
 using TtsChunkCallback = std::function<void(const TtsStreamChunk&)>;

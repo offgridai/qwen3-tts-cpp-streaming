@@ -16,6 +16,36 @@ namespace pipeline_internal {
 struct ops;
 }
 
+struct tts_stream_hint_header {
+    int32_t sample_rate = 24000;
+    std::string model_type;
+    bool has_instruction = false;
+    bool has_speaker_conditioning = false;
+};
+
+enum class tts_hint_energy_class : uint8_t {
+    unknown = 0,
+    silence = 1,
+    speech_like = 2,
+    burst_like = 3,
+};
+
+struct tts_stream_hint_chunk {
+    int32_t chunk_index = 0;
+    int32_t codec_frame_start = 0;
+    int32_t codec_frame_end = 0;
+    int64_t audio_sample_start = 0;
+    int64_t audio_sample_end = 0;
+    double audio_start_sec = 0.0;
+    double audio_end_sec = 0.0;
+    float rms_energy = 0.0f;
+    float peak_energy = 0.0f;
+    float zero_crossing_rate = 0.0f;
+    tts_hint_energy_class energy_class = tts_hint_energy_class::unknown;
+    bool is_paced_chunk = false;
+    bool is_final = false;
+};
+
 // TTS generation parameters
 struct tts_params {
     // Maximum number of audio tokens to generate
@@ -128,6 +158,8 @@ struct tts_params {
     bool paced_live_playback = false;
     int32_t steady_split_decode_frames = 0;
     std::function<bool(const float * samples, int32_t n_samples, int32_t sample_rate, bool is_final)> audio_chunk_callback;
+    std::function<void(const tts_stream_hint_header & header)> stream_hint_header_callback;
+    std::function<bool(const tts_stream_hint_chunk & chunk)> stream_hint_chunk_callback;
 };
 
 // TTS generation result
