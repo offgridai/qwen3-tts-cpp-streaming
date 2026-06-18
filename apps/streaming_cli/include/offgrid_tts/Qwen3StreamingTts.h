@@ -17,6 +17,8 @@ struct TtsStreamHintHeader {
     std::string model_type;
     bool has_instruction = false;
     bool has_speaker_conditioning = false;
+    int32_t text_token_count = 0;
+    bool has_experimental_text_progress = false;
 };
 
 struct TtsStreamHintChunk {
@@ -31,6 +33,10 @@ struct TtsStreamHintChunk {
     float peak_energy = 0.0f;
     float zero_crossing_rate = 0.0f;
     TtsHintEnergyClass energy_class = TtsHintEnergyClass::unknown;
+    double text_progress = 0.0;
+    int32_t text_token_index_estimate = -1;
+    float text_progress_confidence = 0.0f;
+    bool is_text_progress_experimental = false;
     bool is_paced_chunk = false;
     bool is_final = false;
 };

@@ -59,6 +59,10 @@ TtsStreamHintChunk ConvertHintChunk(const qwen3_tts::tts_stream_hint_chunk & chu
     out.peak_energy = chunk.peak_energy;
     out.zero_crossing_rate = chunk.zero_crossing_rate;
     out.energy_class = ConvertEnergyClass(chunk.energy_class);
+    out.text_progress = chunk.text_progress;
+    out.text_token_index_estimate = chunk.text_token_index_estimate;
+    out.text_progress_confidence = chunk.text_progress_confidence;
+    out.is_text_progress_experimental = chunk.is_text_progress_experimental;
     out.is_paced_chunk = chunk.is_paced_chunk;
     out.is_final = chunk.is_final;
     return out;
@@ -157,6 +161,8 @@ bool Qwen3StreamingTts::warm_voice_profile(const TtsStreamOptions& options) {
                 out.model_type = header.model_type;
                 out.has_instruction = header.has_instruction;
                 out.has_speaker_conditioning = header.has_speaker_conditioning;
+                out.text_token_count = header.text_token_count;
+                out.has_experimental_text_progress = header.has_experimental_text_progress;
                 on_hint_header(out);
             };
     }
@@ -246,6 +252,8 @@ bool Qwen3StreamingTts::synthesize_streaming(
                 out.model_type = header.model_type;
                 out.has_instruction = header.has_instruction;
                 out.has_speaker_conditioning = header.has_speaker_conditioning;
+                out.text_token_count = header.text_token_count;
+                out.has_experimental_text_progress = header.has_experimental_text_progress;
                 on_hint_header(out);
             };
     }

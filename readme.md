@@ -206,10 +206,21 @@ Current hint chunk fields:
 - `peak_energy`
 - `zero_crossing_rate`
 - `energy_class`
+- `text_progress`
+- `text_token_index_estimate`
+- `text_progress_confidence`
+- `is_text_progress_experimental`
 - `is_paced_chunk`
 - `is_final`
 
 `audio_sample_end` and `audio_end_sec` use exclusive-end semantics.
+
+Experimental V2 note:
+
+- `text_progress` is a soft monotonic model-path hint in `[0, 1]`
+- it is not a forced alignment result
+- `text_progress_confidence` is intentionally conservative
+- downstream consumers should blend it with occupancy evidence rather than treating it as authority
 
 ## Current Streaming Defaults
 

@@ -99,6 +99,7 @@ tts_stream_hint_chunk build_hint_chunk(const float * samples,
                                        int32_t codec_frame_start,
                                        int32_t codec_frame_end,
                                        int64_t audio_sample_start,
+                                       int32_t text_token_count,
                                        bool is_paced_chunk,
                                        bool is_final) {
     tts_stream_hint_chunk hint;
@@ -111,6 +112,16 @@ tts_stream_hint_chunk build_hint_chunk(const float * samples,
     hint.audio_end_sec = qwen3_samples_to_sec((size_t) std::max<int64_t>(0, hint.audio_sample_end), sample_rate);
     hint.is_paced_chunk = is_paced_chunk;
     hint.is_final = is_final;
+    hint.is_text_progress_experimental = text_token_count > 0;
+    if (text_token_count > 0) {
+        const int32_t clamped_end_frame = std::max(0, std::min(codec_frame_end, text_token_count));
+        const int32_t clamped_start_frame = std::max(0, std::min(codec_frame_start, text_token_count));
+        const int32_t covered_text_frames = std::max(0, clamped_end_frame - clamped_start_frame);
+        const int32_t chunk_frames = std::max(1, codec_frame_end - codec_frame_start);
+        hint.text_progress = std::min(1.0, std::max(0.0, (double) clamped_end_frame / (double) text_token_count));
+        hint.text_token_index_estimate = std::min(text_token_count - 1, std::max(0, clamped_end_frame - 1));
+        hint.text_progress_confidence = 0.60f * ((float) covered_text_frames / (float) chunk_frames);
+    }
 
     if (!samples || count == 0) {
         hint.energy_class = tts_hint_energy_class::unknown;
@@ -688,6 +699,11 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
     int64_t t_tokenize_start = get_time_ms();
     std::vector<int32_t> text_tokens = self.tokenizer_.encode_for_tts(text);
     std::vector<int32_t> instruct_tokens;
+    const int32_t text_prefix_token_count = 3;
+    const int32_t text_suffix_token_count = 5;
+    const int32_t text_content_token_count = std::max<int32_t>(
+        0,
+        (int32_t) text_tokens.size() - text_prefix_token_count - text_suffix_token_count);
     if (!params.instruction.empty()) {
         const std::string instruction_cache_key = params.instruction_cache_key.empty()
             ? params.instruction
@@ -815,6 +831,8 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             header.model_type = self.transformer_.get_config().tts_model_type;
             header.has_instruction = !params.instruction.empty();
             header.has_speaker_conditioning = speaker_embedding != nullptr;
+            header.text_token_count = text_content_token_count;
+            header.has_experimental_text_progress = text_content_token_count > 0;
             params.stream_hint_header_callback(header);
         }
 
@@ -1178,6 +1196,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                             codec_frame_start,
                             codec_frame_end,
                             audio_sample_start,
+                            text_content_token_count,
                             true,
                             is_final);
                     }
@@ -1285,6 +1304,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                     job.new_start,
                     job.end_frame,
                     appended_audio_sample_start,
+                    text_content_token_count,
                     false,
                     job.is_final);
                 if (params.stream_hint_chunk_callback && !params.stream_hint_chunk_callback(hint)) {

@@ -104,6 +104,7 @@ The hint track is deliberately non-linguistic. It carries:
 - codec-frame provenance for each emitted chunk
 - cheap PCM-derived evidence such as RMS, peak, and zero-crossing rate
 - a heuristic energy class: `unknown`, `silence`, `speech_like`, or `burst_like`
+- an experimental monotonic `text_progress` hint derived from the model's trailing text-conditioning path
 
 The hint track does not attempt to provide:
 
@@ -165,6 +166,9 @@ Important conventions:
   that contributed newly emitted audio to the chunk
 - `is_paced_chunk=true` means the chunk came from paced subchunk delivery rather than
   a single direct decode-window emission
+- `text_progress` is a soft monotonic hint in `[0, 1]`, not a word or phoneme alignment result
+- `text_token_index_estimate` is an estimate over the encoded text-token sequence only
+- `text_progress_confidence` should be treated as a conservative heuristic confidence, not a calibrated probability
 
 Because the engine supports overlap trimming and paced subchunk slicing, a single
 callback chunk is not guaranteed to correspond one-to-one with a single codec frame.

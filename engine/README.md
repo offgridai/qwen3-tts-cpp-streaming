@@ -102,6 +102,10 @@ The chunk callback exposes:
 - `peak_energy`
 - `zero_crossing_rate`
 - `energy_class`
+- `text_progress`
+- `text_token_index_estimate`
+- `text_progress_confidence`
+- `is_text_progress_experimental`
 - `is_paced_chunk`
 - `is_final`
 
@@ -110,6 +114,7 @@ Scope note:
 - this is a timing/provenance track, not a linguistic alignment layer
 - the engine does not emit words, phonemes, visemes, or final lipsync timings
 - `audio_sample_end` and `audio_end_sec` are exclusive-end
+- `text_progress` is experimental and should be treated as a soft monotonic prior, not authority
 
 ## Layout
 
