@@ -12,6 +12,23 @@ enum class TtsHintEnergyClass : uint8_t {
     burst_like = 3,
 };
 
+enum class TtsHintActivityClass : uint8_t {
+    unknown = 0,
+    silence = 1,
+    speech_like = 2,
+    burst_like = 3,
+};
+
+struct TtsStreamActivitySpan {
+    int64_t audio_sample_start = 0;
+    int64_t audio_sample_end = 0;
+    double audio_start_sec = 0.0;
+    double audio_end_sec = 0.0;
+    TtsHintActivityClass activity_class = TtsHintActivityClass::unknown;
+    float confidence = 0.0f;
+    bool is_experimental = true;
+};
+
 struct TtsStreamHintHeader {
     int32_t sample_rate = 24000;
     std::string model_type;
@@ -33,7 +50,14 @@ struct TtsStreamHintChunk {
     float peak_energy = 0.0f;
     float zero_crossing_rate = 0.0f;
     TtsHintEnergyClass energy_class = TtsHintEnergyClass::unknown;
+    bool has_speech = false;
+    float speech_occupancy = 0.0f;
+    std::vector<TtsStreamActivitySpan> activity_spans;
+    double text_progress_start = 0.0;
+    double text_progress_end = 0.0;
     double text_progress = 0.0;
+    int32_t text_token_index_start_estimate = -1;
+    int32_t text_token_index_end_estimate = -1;
     int32_t text_token_index_estimate = -1;
     float text_progress_confidence = 0.0f;
     bool is_text_progress_experimental = false;

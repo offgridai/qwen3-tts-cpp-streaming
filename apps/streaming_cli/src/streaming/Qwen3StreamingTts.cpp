@@ -46,6 +46,20 @@ TtsHintEnergyClass ConvertEnergyClass(qwen3_tts::tts_hint_energy_class value) {
     }
 }
 
+TtsHintActivityClass ConvertActivityClass(qwen3_tts::tts_hint_activity_class value) {
+    switch (value) {
+    case qwen3_tts::tts_hint_activity_class::silence:
+        return TtsHintActivityClass::silence;
+    case qwen3_tts::tts_hint_activity_class::speech_like:
+        return TtsHintActivityClass::speech_like;
+    case qwen3_tts::tts_hint_activity_class::burst_like:
+        return TtsHintActivityClass::burst_like;
+    case qwen3_tts::tts_hint_activity_class::unknown:
+    default:
+        return TtsHintActivityClass::unknown;
+    }
+}
+
 TtsStreamHintChunk ConvertHintChunk(const qwen3_tts::tts_stream_hint_chunk & chunk) {
     TtsStreamHintChunk out;
     out.chunk_index = chunk.chunk_index;
@@ -59,7 +73,25 @@ TtsStreamHintChunk ConvertHintChunk(const qwen3_tts::tts_stream_hint_chunk & chu
     out.peak_energy = chunk.peak_energy;
     out.zero_crossing_rate = chunk.zero_crossing_rate;
     out.energy_class = ConvertEnergyClass(chunk.energy_class);
+    out.has_speech = chunk.has_speech;
+    out.speech_occupancy = chunk.speech_occupancy;
+    out.activity_spans.reserve(chunk.activity_spans.size());
+    for (const qwen3_tts::tts_stream_activity_span & span : chunk.activity_spans) {
+        TtsStreamActivitySpan out_span;
+        out_span.audio_sample_start = span.audio_sample_start;
+        out_span.audio_sample_end = span.audio_sample_end;
+        out_span.audio_start_sec = span.audio_start_sec;
+        out_span.audio_end_sec = span.audio_end_sec;
+        out_span.activity_class = ConvertActivityClass(span.activity_class);
+        out_span.confidence = span.confidence;
+        out_span.is_experimental = span.is_experimental;
+        out.activity_spans.push_back(out_span);
+    }
+    out.text_progress_start = chunk.text_progress_start;
+    out.text_progress_end = chunk.text_progress_end;
     out.text_progress = chunk.text_progress;
+    out.text_token_index_start_estimate = chunk.text_token_index_start_estimate;
+    out.text_token_index_end_estimate = chunk.text_token_index_end_estimate;
     out.text_token_index_estimate = chunk.text_token_index_estimate;
     out.text_progress_confidence = chunk.text_progress_confidence;
     out.is_text_progress_experimental = chunk.is_text_progress_experimental;

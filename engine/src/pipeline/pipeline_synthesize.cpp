@@ -93,10 +93,167 @@ tts_hint_energy_class classify_hint_energy(float rms_energy, float peak_energy, 
     return tts_hint_energy_class::unknown;
 }
 
+tts_hint_activity_class classify_hint_activity(float rms_energy, float peak_energy, float zero_crossing_rate) {
+    switch (classify_hint_energy(rms_energy, peak_energy, zero_crossing_rate)) {
+    case tts_hint_energy_class::silence:
+        return tts_hint_activity_class::silence;
+    case tts_hint_energy_class::speech_like:
+        return tts_hint_activity_class::speech_like;
+    case tts_hint_energy_class::burst_like:
+        return tts_hint_activity_class::burst_like;
+    case tts_hint_energy_class::unknown:
+    default:
+        return tts_hint_activity_class::unknown;
+    }
+}
+
+float classify_hint_activity_confidence(tts_hint_activity_class activity_class,
+                                        float rms_energy,
+                                        float peak_energy,
+                                        float zero_crossing_rate) {
+    switch (activity_class) {
+    case tts_hint_activity_class::silence: {
+        const float quiet_peak = std::clamp((0.015f - peak_energy) / 0.015f, 0.0f, 1.0f);
+        const float quiet_rms = std::clamp((0.008f - rms_energy) / 0.008f, 0.0f, 1.0f);
+        return 0.35f + 0.65f * std::max(quiet_peak, quiet_rms);
+    }
+    case tts_hint_activity_class::speech_like: {
+        const float speech_rms = std::clamp((rms_energy - 0.02f) / 0.08f, 0.0f, 1.0f);
+        const float speech_peak = std::clamp((peak_energy - 0.08f) / 0.20f, 0.0f, 1.0f);
+        const float zcr_ok = 1.0f - std::clamp(std::fabs(zero_crossing_rate - 0.12f) / 0.20f, 0.0f, 1.0f);
+        return 0.25f + 0.75f * std::max(std::max(speech_rms, speech_peak), zcr_ok * 0.6f);
+    }
+    case tts_hint_activity_class::burst_like: {
+        const float burst_peak = std::clamp((peak_energy - 0.75f) / 0.25f, 0.0f, 1.0f);
+        const float transient_rms = 1.0f - std::clamp((rms_energy - 0.18f) / 0.20f, 0.0f, 1.0f);
+        return 0.30f + 0.70f * std::max(burst_peak, transient_rms);
+    }
+    case tts_hint_activity_class::unknown:
+    default:
+        return 0.15f;
+    }
+}
+
+void append_activity_span(std::vector<tts_stream_activity_span> & spans,
+                          tts_hint_activity_class activity_class,
+                          int64_t audio_sample_start,
+                          int64_t audio_sample_end,
+                          int32_t sample_rate,
+                          float confidence) {
+    if (audio_sample_end <= audio_sample_start) {
+        return;
+    }
+
+    tts_stream_activity_span span;
+    span.audio_sample_start = audio_sample_start;
+    span.audio_sample_end = audio_sample_end;
+    span.audio_start_sec = qwen3_samples_to_sec((size_t) std::max<int64_t>(0, audio_sample_start), sample_rate);
+    span.audio_end_sec = qwen3_samples_to_sec((size_t) std::max<int64_t>(0, audio_sample_end), sample_rate);
+    span.activity_class = activity_class;
+    span.confidence = confidence;
+    spans.push_back(span);
+}
+
+std::vector<tts_stream_activity_span> build_activity_spans(const float * samples,
+                                                           size_t count,
+                                                           int32_t sample_rate,
+                                                           int64_t audio_sample_start,
+                                                           bool * has_speech_out,
+                                                           float * speech_occupancy_out) {
+    std::vector<tts_stream_activity_span> spans;
+    if (has_speech_out) {
+        *has_speech_out = false;
+    }
+    if (speech_occupancy_out) {
+        *speech_occupancy_out = 0.0f;
+    }
+    if (!samples || count == 0 || sample_rate <= 0) {
+        return spans;
+    }
+
+    const size_t microframe_samples = std::max<size_t>(1, (size_t) sample_rate / 100);
+    size_t speech_samples = 0;
+    size_t processed = 0;
+    tts_hint_activity_class current_class = tts_hint_activity_class::unknown;
+    float current_confidence = 0.0f;
+    int64_t current_span_start = audio_sample_start;
+    bool have_current = false;
+
+    while (processed < count) {
+        const size_t frame_start = processed;
+        const size_t frame_count = std::min(microframe_samples, count - frame_start);
+
+        double sum_sq = 0.0;
+        float peak = 0.0f;
+        int64_t zero_crossings = 0;
+        float prev = samples[frame_start];
+        for (size_t i = 0; i < frame_count; ++i) {
+            const float sample = samples[frame_start + i];
+            const float abs_sample = std::fabs(sample);
+            if (abs_sample > peak) {
+                peak = abs_sample;
+            }
+            sum_sq += (double) sample * (double) sample;
+            if (i > 0) {
+                const bool prev_nonneg = prev >= 0.0f;
+                const bool curr_nonneg = sample >= 0.0f;
+                if (prev_nonneg != curr_nonneg) {
+                    ++zero_crossings;
+                }
+            }
+            prev = sample;
+        }
+
+        const float rms = (float) std::sqrt(sum_sq / (double) frame_count);
+        const float zcr = frame_count > 1 ? (float) ((double) zero_crossings / (double) (frame_count - 1)) : 0.0f;
+        const tts_hint_activity_class frame_class = classify_hint_activity(rms, peak, zcr);
+        const float frame_confidence = classify_hint_activity_confidence(frame_class, rms, peak, zcr);
+        const int64_t frame_audio_start = audio_sample_start + (int64_t) frame_start;
+        const int64_t frame_audio_end = frame_audio_start + (int64_t) frame_count;
+
+        if (frame_class == tts_hint_activity_class::speech_like) {
+            speech_samples += frame_count;
+            if (has_speech_out) {
+                *has_speech_out = true;
+            }
+        }
+
+        if (!have_current) {
+            current_class = frame_class;
+            current_confidence = frame_confidence;
+            current_span_start = frame_audio_start;
+            have_current = true;
+        } else if (frame_class != current_class) {
+            append_activity_span(spans, current_class, current_span_start, frame_audio_start, sample_rate, current_confidence);
+            current_class = frame_class;
+            current_confidence = frame_confidence;
+            current_span_start = frame_audio_start;
+        } else {
+            current_confidence = std::max(current_confidence, frame_confidence);
+        }
+
+        processed += frame_count;
+        if (processed >= count) {
+            append_activity_span(spans, current_class, current_span_start, frame_audio_end, sample_rate, current_confidence);
+        }
+    }
+
+    if (speech_occupancy_out) {
+        *speech_occupancy_out = count > 0 ? (float) ((double) speech_samples / (double) count) : 0.0f;
+    }
+    return spans;
+}
+
 struct frame_text_progress_estimate {
     double progress = 0.0;
     int32_t token_index_estimate = -1;
     float confidence = 0.0f;
+};
+
+struct chunk_text_progress_estimate {
+    frame_text_progress_estimate start;
+    frame_text_progress_estimate end;
+    double mean_confidence = 0.0;
 };
 
 tts_stream_hint_chunk build_hint_chunk(const float * samples,
@@ -107,7 +264,7 @@ tts_stream_hint_chunk build_hint_chunk(const float * samples,
                                        int32_t codec_frame_end,
                                        int64_t audio_sample_start,
                                        int32_t text_token_count,
-                                       const frame_text_progress_estimate * text_progress_estimate,
+                                       const chunk_text_progress_estimate * text_progress_estimate,
                                        bool is_paced_chunk,
                                        bool is_final) {
     tts_stream_hint_chunk hint;
@@ -122,14 +279,22 @@ tts_stream_hint_chunk build_hint_chunk(const float * samples,
     hint.is_final = is_final;
     hint.is_text_progress_experimental = text_progress_estimate != nullptr;
     if (text_progress_estimate) {
-        hint.text_progress = text_progress_estimate->progress;
-        hint.text_token_index_estimate = text_progress_estimate->token_index_estimate;
-        hint.text_progress_confidence = text_progress_estimate->confidence;
+        hint.text_progress_start = text_progress_estimate->start.progress;
+        hint.text_progress_end = text_progress_estimate->end.progress;
+        hint.text_progress = hint.text_progress_end;
+        hint.text_token_index_start_estimate = text_progress_estimate->start.token_index_estimate;
+        hint.text_token_index_end_estimate = text_progress_estimate->end.token_index_estimate;
+        hint.text_token_index_estimate = hint.text_token_index_end_estimate;
+        hint.text_progress_confidence = (float) text_progress_estimate->mean_confidence;
     }
     if (is_final && text_token_count > 0 && text_progress_estimate) {
         // Stream completion is authoritative even when the experimental per-frame
         // estimator is still lagging behind on the final emitted chunk.
+        hint.text_progress_start = std::min(hint.text_progress_start, 1.0);
+        hint.text_progress_end = 1.0;
         hint.text_progress = 1.0;
+        hint.text_token_index_start_estimate = std::max(0, hint.text_token_index_start_estimate);
+        hint.text_token_index_end_estimate = text_token_count - 1;
         hint.text_token_index_estimate = text_token_count - 1;
         hint.text_progress_confidence = 1.0f;
     }
@@ -138,6 +303,14 @@ tts_stream_hint_chunk build_hint_chunk(const float * samples,
         hint.energy_class = tts_hint_energy_class::unknown;
         return hint;
     }
+
+    hint.activity_spans = build_activity_spans(
+        samples,
+        count,
+        sample_rate,
+        audio_sample_start,
+        &hint.has_speech,
+        &hint.speech_occupancy);
 
     double sum_sq = 0.0;
     float peak = 0.0f;
@@ -1062,8 +1235,8 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             return estimate;
         };
 
-        auto get_chunk_text_progress_estimate = [&](int32_t codec_frame_start, int32_t codec_frame_end) -> frame_text_progress_estimate {
-            frame_text_progress_estimate estimate;
+        auto get_chunk_text_progress_estimate = [&](int32_t codec_frame_start, int32_t codec_frame_end) -> chunk_text_progress_estimate {
+            chunk_text_progress_estimate estimate;
             if (frame_text_progress.empty() || codec_frame_end <= 0) {
                 return estimate;
             }
@@ -1081,11 +1254,21 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                 sum_confidence += frame_text_progress[(size_t) frame_index].confidence;
                 ++count;
             }
-            estimate = frame_text_progress[(size_t) end_index];
+            estimate.start = frame_text_progress[(size_t) start_index];
+            estimate.end = frame_text_progress[(size_t) end_index];
             if (count > 0) {
-                estimate.progress = std::max(estimate.progress, sum_progress / (double) count);
-                estimate.confidence = (float) (sum_confidence / (double) count);
+                estimate.end.progress = std::max(estimate.end.progress, sum_progress / (double) count);
+                estimate.end.token_index_estimate = std::max(
+                    estimate.end.token_index_estimate,
+                    estimate.start.token_index_estimate);
+                estimate.mean_confidence = sum_confidence / (double) count;
+                estimate.start.confidence = std::max(estimate.start.confidence, (float) estimate.mean_confidence);
+                estimate.end.confidence = std::max(estimate.end.confidence, (float) estimate.mean_confidence);
             }
+            estimate.start.progress = std::min(estimate.start.progress, estimate.end.progress);
+            estimate.start.token_index_estimate = std::min(
+                estimate.start.token_index_estimate,
+                estimate.end.token_index_estimate);
             return estimate;
         };
 
@@ -1343,7 +1526,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                         if (delivery_state.first_emit_wall_ms < 0) {
                             delivery_state.first_emit_wall_ms = wall_ms;
                         }
-                        const frame_text_progress_estimate chunk_text_progress =
+                        const chunk_text_progress_estimate chunk_text_progress =
                             get_chunk_text_progress_estimate(codec_frame_start, codec_frame_end);
                         hint = build_hint_chunk(
                             chunk.data(),
@@ -1454,7 +1637,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                 delivery_state.cv.notify_one();
             }
             if (!paced_delivery && appended_samples > 0) {
-                const frame_text_progress_estimate chunk_text_progress =
+                const chunk_text_progress_estimate chunk_text_progress =
                     get_chunk_text_progress_estimate(job.new_start, job.end_frame);
                 const tts_stream_hint_chunk hint = build_hint_chunk(
                     result.audio.data() + (ptrdiff_t) append_offset,

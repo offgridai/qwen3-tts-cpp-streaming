@@ -32,6 +32,23 @@ enum class tts_hint_energy_class : uint8_t {
     burst_like = 3,
 };
 
+enum class tts_hint_activity_class : uint8_t {
+    unknown = 0,
+    silence = 1,
+    speech_like = 2,
+    burst_like = 3,
+};
+
+struct tts_stream_activity_span {
+    int64_t audio_sample_start = 0;
+    int64_t audio_sample_end = 0;
+    double audio_start_sec = 0.0;
+    double audio_end_sec = 0.0;
+    tts_hint_activity_class activity_class = tts_hint_activity_class::unknown;
+    float confidence = 0.0f;
+    bool is_experimental = true;
+};
+
 struct tts_stream_hint_chunk {
     int32_t chunk_index = 0;
     int32_t codec_frame_start = 0;
@@ -44,7 +61,14 @@ struct tts_stream_hint_chunk {
     float peak_energy = 0.0f;
     float zero_crossing_rate = 0.0f;
     tts_hint_energy_class energy_class = tts_hint_energy_class::unknown;
+    bool has_speech = false;
+    float speech_occupancy = 0.0f;
+    std::vector<tts_stream_activity_span> activity_spans;
+    double text_progress_start = 0.0;
+    double text_progress_end = 0.0;
     double text_progress = 0.0;
+    int32_t text_token_index_start_estimate = -1;
+    int32_t text_token_index_end_estimate = -1;
     int32_t text_token_index_estimate = -1;
     float text_progress_confidence = 0.0f;
     bool is_text_progress_experimental = false;
