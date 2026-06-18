@@ -106,6 +106,7 @@ tts_stream_hint_chunk build_hint_chunk(const float * samples,
                                        int32_t codec_frame_start,
                                        int32_t codec_frame_end,
                                        int64_t audio_sample_start,
+                                       int32_t text_token_count,
                                        const frame_text_progress_estimate * text_progress_estimate,
                                        bool is_paced_chunk,
                                        bool is_final) {
@@ -124,6 +125,13 @@ tts_stream_hint_chunk build_hint_chunk(const float * samples,
         hint.text_progress = text_progress_estimate->progress;
         hint.text_token_index_estimate = text_progress_estimate->token_index_estimate;
         hint.text_progress_confidence = text_progress_estimate->confidence;
+    }
+    if (is_final && text_token_count > 0 && text_progress_estimate) {
+        // Stream completion is authoritative even when the experimental per-frame
+        // estimator is still lagging behind on the final emitted chunk.
+        hint.text_progress = 1.0;
+        hint.text_token_index_estimate = text_token_count - 1;
+        hint.text_progress_confidence = 1.0f;
     }
 
     if (!samples || count == 0) {
@@ -1345,6 +1353,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                             codec_frame_start,
                             codec_frame_end,
                             audio_sample_start,
+                            text_content_token_count,
                             frame_text_progress.empty() ? nullptr : &chunk_text_progress,
                             true,
                             is_final);
@@ -1455,6 +1464,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                     job.new_start,
                     job.end_frame,
                     appended_audio_sample_start,
+                    text_content_token_count,
                     frame_text_progress.empty() ? nullptr : &chunk_text_progress,
                     false,
                     job.is_final);
