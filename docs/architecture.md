@@ -104,7 +104,7 @@ The hint track is deliberately non-linguistic. It carries:
 - codec-frame provenance for each emitted chunk
 - cheap PCM-derived evidence such as RMS, peak, and zero-crossing rate
 - a heuristic energy class: `unknown`, `silence`, `speech_like`, or `burst_like`
-- an experimental monotonic `text_progress` hint derived from the model's trailing text-conditioning path
+- an experimental monotonic `text_progress` hint derived from full text-token projection similarity against per-frame talker hidden states
 
 The hint track does not attempt to provide:
 

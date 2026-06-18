@@ -33,6 +33,11 @@ The most useful artifact for downstream integration work is usually `qwen3_strea
 
 ## Build
 
+Use a Visual Studio Developer PowerShell / Developer Command Prompt, or import the
+MSVC toolchain environment before invoking CMake. A plain PowerShell session can
+find `cl.exe` but still miss the standard include/library paths, which produces
+errors such as `cannot open include file: 'stdbool.h'`.
+
 ### Visual Studio x64 build
 
 Configure:
@@ -69,10 +74,19 @@ build-vs2022-x64\engine\Release\tts_engine_cli.exe
 
 ### Ninja build
 
-If you already use the Ninja build tree in this repo:
+If you already use the Ninja build tree in this repo, run the build from a Visual
+Studio developer shell:
 
 ```powershell
 cmake --build build-ninja-cuda --target qwen3_streaming_cli
+```
+
+From a plain PowerShell session, this equivalent wrapper also works:
+
+```powershell
+$vsdev = '"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat" -host_arch=x64 -arch=x64 >nul'
+$cmake = '"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" --build build-ninja-cuda --target qwen3_streaming_cli'
+cmd /c "$vsdev && $cmake"
 ```
 
 ## Windows Runtime DLLs
@@ -217,8 +231,9 @@ Current hint chunk fields:
 
 Experimental V2 note:
 
-- `text_progress` is a soft monotonic model-path hint in `[0, 1]`
+- `text_progress` is a soft monotonic whole-transcript model-path hint in `[0, 1]`
 - it is not a forced alignment result
+- it is derived from full text-token projection similarity against per-frame talker hidden states
 - `text_progress_confidence` is intentionally conservative
 - downstream consumers should blend it with occupancy evidence rather than treating it as authority
 

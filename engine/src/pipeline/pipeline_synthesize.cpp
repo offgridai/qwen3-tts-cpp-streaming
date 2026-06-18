@@ -1,5 +1,6 @@
 #include "qwen3_tts.h"
 #include "pipeline/pipeline_internal.h"
+#include "transformer/transformer_internal.h"
 
 #include <algorithm>
 #include <atomic>
@@ -92,6 +93,12 @@ tts_hint_energy_class classify_hint_energy(float rms_energy, float peak_energy, 
     return tts_hint_energy_class::unknown;
 }
 
+struct frame_text_progress_estimate {
+    double progress = 0.0;
+    int32_t token_index_estimate = -1;
+    float confidence = 0.0f;
+};
+
 tts_stream_hint_chunk build_hint_chunk(const float * samples,
                                        size_t count,
                                        int32_t sample_rate,
@@ -99,7 +106,7 @@ tts_stream_hint_chunk build_hint_chunk(const float * samples,
                                        int32_t codec_frame_start,
                                        int32_t codec_frame_end,
                                        int64_t audio_sample_start,
-                                       int32_t text_token_count,
+                                       const frame_text_progress_estimate * text_progress_estimate,
                                        bool is_paced_chunk,
                                        bool is_final) {
     tts_stream_hint_chunk hint;
@@ -112,15 +119,11 @@ tts_stream_hint_chunk build_hint_chunk(const float * samples,
     hint.audio_end_sec = qwen3_samples_to_sec((size_t) std::max<int64_t>(0, hint.audio_sample_end), sample_rate);
     hint.is_paced_chunk = is_paced_chunk;
     hint.is_final = is_final;
-    hint.is_text_progress_experimental = text_token_count > 0;
-    if (text_token_count > 0) {
-        const int32_t clamped_end_frame = std::max(0, std::min(codec_frame_end, text_token_count));
-        const int32_t clamped_start_frame = std::max(0, std::min(codec_frame_start, text_token_count));
-        const int32_t covered_text_frames = std::max(0, clamped_end_frame - clamped_start_frame);
-        const int32_t chunk_frames = std::max(1, codec_frame_end - codec_frame_start);
-        hint.text_progress = std::min(1.0, std::max(0.0, (double) clamped_end_frame / (double) text_token_count));
-        hint.text_token_index_estimate = std::min(text_token_count - 1, std::max(0, clamped_end_frame - 1));
-        hint.text_progress_confidence = 0.60f * ((float) covered_text_frames / (float) chunk_frames);
+    hint.is_text_progress_experimental = text_progress_estimate != nullptr;
+    if (text_progress_estimate) {
+        hint.text_progress = text_progress_estimate->progress;
+        hint.text_token_index_estimate = text_progress_estimate->token_index_estimate;
+        hint.text_progress_confidence = text_progress_estimate->confidence;
     }
 
     if (!samples || count == 0) {
@@ -774,6 +777,30 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
     }
     self.transformer_.clear_kv_cache();
 
+    std::vector<float> text_content_proj;
+    std::vector<float> text_content_proj_norms;
+    if (text_content_token_count > 0) {
+        if (!transformer_internal::ops::project_text_tokens(
+                self.transformer_,
+                text_tokens.data() + text_prefix_token_count,
+                text_content_token_count,
+                text_content_proj)) {
+            result.error_msg = "Failed to project text content tokens: " + self.transformer_.get_error();
+            return result;
+        }
+        const int32_t hidden_size = self.transformer_.get_config().hidden_size;
+        text_content_proj_norms.resize((size_t) text_content_token_count, 1.0f);
+        for (int32_t token_index = 0; token_index < text_content_token_count; ++token_index) {
+            const float * row = text_content_proj.data() + (size_t) token_index * hidden_size;
+            double sum_sq = 0.0;
+            for (int32_t h = 0; h < hidden_size; ++h) {
+                sum_sq += (double) row[h] * (double) row[h];
+            }
+            const float norm = (float) std::sqrt(std::max(1e-12, sum_sq));
+            text_content_proj_norms[(size_t) token_index] = norm;
+        }
+    }
+
     std::vector<int32_t> speech_codes;
     int n_codebooks = self.transformer_.get_config().n_codebooks;
     int n_frames = 0;
@@ -865,6 +892,9 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
         std::atomic<int32_t> last_selected_tail_window{steady_window};
         tts_generation_first_frame_profile first_frame_profile{};
         std::atomic<int32_t> hint_chunk_index{0};
+        std::vector<frame_text_progress_estimate> frame_text_progress;
+        frame_text_progress.reserve((size_t) std::max(1, params.max_audio_tokens));
+        double last_text_progress_index = 0.0;
 
         std::unique_ptr<StreamingAudioPlayer> live_player;
         if (params.play_streaming) {
@@ -933,6 +963,123 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             std::vector<HintSampleRange> hint_ranges;
             std::string error_msg;
         } delivery_state;
+
+        auto estimate_latest_frame_text_progress = [&]() -> frame_text_progress_estimate {
+            frame_text_progress_estimate estimate;
+            if (text_content_token_count <= 0 || text_content_proj.empty()) {
+                return estimate;
+            }
+
+            std::vector<float> hidden;
+            if (!self.transformer_.get_hidden_states(hidden) || hidden.empty()) {
+                return estimate;
+            }
+
+            const int32_t hidden_size = self.transformer_.get_config().hidden_size;
+            if ((int32_t) hidden.size() != hidden_size) {
+                return estimate;
+            }
+
+            double hidden_sum_sq = 0.0;
+            for (int32_t h = 0; h < hidden_size; ++h) {
+                hidden_sum_sq += (double) hidden[(size_t) h] * (double) hidden[(size_t) h];
+            }
+            const double hidden_norm = std::sqrt(std::max(1e-12, hidden_sum_sq));
+
+            const int32_t previous_anchor = std::max(0, std::min(text_content_token_count - 1, (int32_t) std::floor(last_text_progress_index)));
+            const int32_t candidate_start = std::max(0, previous_anchor - 1);
+            const int32_t candidate_end = std::min(text_content_token_count - 1, previous_anchor + 3);
+
+            std::vector<double> scores;
+            scores.reserve((size_t) (candidate_end - candidate_start + 1));
+            double max_score = -1e30;
+            for (int32_t token_index = candidate_start; token_index <= candidate_end; ++token_index) {
+                const float * token_row = text_content_proj.data() + (size_t) token_index * hidden_size;
+                double dot = 0.0;
+                for (int32_t h = 0; h < hidden_size; ++h) {
+                    dot += (double) hidden[(size_t) h] * (double) token_row[h];
+                }
+                double cosine = dot / (hidden_norm * (double) text_content_proj_norms[(size_t) token_index]);
+                if (token_index < previous_anchor) {
+                    cosine -= 0.20;
+                }
+                const double distance_penalty = 0.03 * (double) (token_index - previous_anchor);
+                cosine -= std::max(0.0, distance_penalty);
+                scores.push_back(cosine);
+                if (cosine > max_score) {
+                    max_score = cosine;
+                }
+            }
+
+            double sum_weight = 0.0;
+            double weighted_index = 0.0;
+            int32_t best_local_index = 0;
+            double best_weight = -1.0;
+            double second_best_weight = -1.0;
+            const double softmax_temperature = 8.0;
+            for (size_t i = 0; i < scores.size(); ++i) {
+                const double weight = std::exp((scores[i] - max_score) * softmax_temperature);
+                sum_weight += weight;
+                weighted_index += weight * (double) (candidate_start + (int32_t) i);
+                if (weight > best_weight) {
+                    second_best_weight = best_weight;
+                    best_weight = weight;
+                    best_local_index = (int32_t) i;
+                } else if (weight > second_best_weight) {
+                    second_best_weight = weight;
+                }
+            }
+
+            if (sum_weight <= 0.0) {
+                return estimate;
+            }
+
+            const double centroid_index = weighted_index / sum_weight;
+            const double smoothed_index = std::max(
+                last_text_progress_index,
+                std::min((double) (text_content_token_count - 1),
+                         last_text_progress_index * 0.55 + centroid_index * 0.45));
+            last_text_progress_index = smoothed_index;
+
+            const double peak_prob = best_weight / sum_weight;
+            const double second_prob = second_best_weight > 0.0 ? (second_best_weight / sum_weight) : 0.0;
+            const double confidence = std::clamp(0.15 + 0.85 * (peak_prob - second_prob), 0.0, 1.0);
+
+            estimate.progress = text_content_token_count > 1
+                ? std::clamp(smoothed_index / (double) (text_content_token_count - 1), 0.0, 1.0)
+                : 1.0;
+            estimate.token_index_estimate = std::max(0, std::min(text_content_token_count - 1, (int32_t) std::llround(smoothed_index)));
+            estimate.confidence = (float) confidence;
+            (void) best_local_index;
+            return estimate;
+        };
+
+        auto get_chunk_text_progress_estimate = [&](int32_t codec_frame_start, int32_t codec_frame_end) -> frame_text_progress_estimate {
+            frame_text_progress_estimate estimate;
+            if (frame_text_progress.empty() || codec_frame_end <= 0) {
+                return estimate;
+            }
+            const int32_t start_index = std::max(0, std::min(codec_frame_start, (int32_t) frame_text_progress.size() - 1));
+            const int32_t end_index = std::max(0, std::min(codec_frame_end - 1, (int32_t) frame_text_progress.size() - 1));
+            if (end_index < start_index) {
+                return estimate;
+            }
+
+            double sum_progress = 0.0;
+            double sum_confidence = 0.0;
+            int32_t count = 0;
+            for (int32_t frame_index = start_index; frame_index <= end_index; ++frame_index) {
+                sum_progress += frame_text_progress[(size_t) frame_index].progress;
+                sum_confidence += frame_text_progress[(size_t) frame_index].confidence;
+                ++count;
+            }
+            estimate = frame_text_progress[(size_t) end_index];
+            if (count > 0) {
+                estimate.progress = std::max(estimate.progress, sum_progress / (double) count);
+                estimate.confidence = (float) (sum_confidence / (double) count);
+            }
+            return estimate;
+        };
 
         auto emit_hint_chunk = [&](const tts_stream_hint_chunk & hint) -> bool {
             if (!params.stream_hint_chunk_callback) {
@@ -1188,6 +1335,8 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                         if (delivery_state.first_emit_wall_ms < 0) {
                             delivery_state.first_emit_wall_ms = wall_ms;
                         }
+                        const frame_text_progress_estimate chunk_text_progress =
+                            get_chunk_text_progress_estimate(codec_frame_start, codec_frame_end);
                         hint = build_hint_chunk(
                             chunk.data(),
                             chunk.size(),
@@ -1196,7 +1345,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                             codec_frame_start,
                             codec_frame_end,
                             audio_sample_start,
-                            text_content_token_count,
+                            frame_text_progress.empty() ? nullptr : &chunk_text_progress,
                             true,
                             is_final);
                     }
@@ -1296,6 +1445,8 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                 delivery_state.cv.notify_one();
             }
             if (!paced_delivery && appended_samples > 0) {
+                const frame_text_progress_estimate chunk_text_progress =
+                    get_chunk_text_progress_estimate(job.new_start, job.end_frame);
                 const tts_stream_hint_chunk hint = build_hint_chunk(
                     result.audio.data() + (ptrdiff_t) append_offset,
                     appended_samples,
@@ -1304,7 +1455,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                     job.new_start,
                     job.end_frame,
                     appended_audio_sample_start,
-                    text_content_token_count,
+                    frame_text_progress.empty() ? nullptr : &chunk_text_progress,
                     false,
                     job.is_final);
                 if (params.stream_hint_chunk_callback && !params.stream_hint_chunk_callback(hint)) {
@@ -1561,6 +1712,9 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
         auto on_frame = [&](const std::vector<int32_t> & all_codes, int32_t frames_available, bool is_final) -> bool {
             if (stream_error.load()) {
                 return false;
+            }
+            while ((int32_t) frame_text_progress.size() < frames_available) {
+                frame_text_progress.push_back(estimate_latest_frame_text_progress());
             }
             if (is_final) {
                 return enqueue_tail_window(all_codes, frames_available, true);

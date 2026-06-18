@@ -115,6 +115,7 @@ Scope note:
 - the engine does not emit words, phonemes, visemes, or final lipsync timings
 - `audio_sample_end` and `audio_end_sec` are exclusive-end
 - `text_progress` is experimental and should be treated as a soft monotonic prior, not authority
+- it is derived from full text-token projection similarity against per-frame talker hidden states, not from forced alignment
 
 ## Layout
 
