@@ -1,0 +1,138 @@
+{
+  "output_wav": "C:\\git\\qwen3-tts-cpp-streaming\\reference\\lana_ref.wav",
+  "fidelity_preset": "high",
+  "consistency_mode": "anchor-clone",
+  "render_path": "anchor-clone-base-batch",
+  "segmentation": "per-line",
+  "segment_count": 11,
+  "anchor": {
+    "line_index": 1,
+    "text": "I was not expecting visitors this late.",
+    "voicedesign_wav": "C:\\git\\qwen3-tts-cpp-streaming\\reference\\lana_ref_segments\\anchor_voicedesign.wav",
+    "speaker_embedding_json": "C:\\git\\qwen3-tts-cpp-streaming\\reference\\lana_ref_segments\\anchor_embedding.json"
+  },
+  "settings": {
+    "temperature": 0.75,
+    "top_k": 16,
+    "top_p": 0.95,
+    "repetition_penalty": 1.02,
+    "max_tokens": 320,
+    "segment_gap_ms": 750.0,
+    "fade_ms": 10.0,
+    "trim_silence": true,
+    "trim_threshold": 0.01,
+    "trim_pad_ms": 35.0
+  },
+  "segments": [
+    {
+      "text": "I was not expecting visitors this late.",
+      "line_index": 1,
+      "is_line_final": true,
+      "file": "C:\\git\\qwen3-tts-cpp-streaming\\reference\\lana_ref_segments\\001.wav",
+      "start_sec": 0.0,
+      "end_sec": 2.224,
+      "duration_sec": 2.224,
+      "source_duration_sec": 2.857
+    },
+    {
+      "text": "What a pleasure it is to meet you here.",
+      "line_index": 2,
+      "is_line_final": true,
+      "file": "C:\\git\\qwen3-tts-cpp-streaming\\reference\\lana_ref_segments\\002.wav",
+      "start_sec": 2.974,
+      "end_sec": 4.894,
+      "duration_sec": 1.919,
+      "source_duration_sec": 2.697
+    },
+    {
+      "text": "I'm so sorry to hear about your loss.",
+      "line_index": 3,
+      "is_line_final": false,
+      "file": "C:\\git\\qwen3-tts-cpp-streaming\\reference\\lana_ref_segments\\003.wav",
+      "start_sec": 5.644,
+      "end_sec": 7.75,
+      "duration_sec": 2.107,
+      "source_duration_sec": 2.617
+    },
+    {
+      "text": "Its heartbreaking.",
+      "line_index": 3,
+      "is_line_final": true,
+      "file": "C:\\git\\qwen3-tts-cpp-streaming\\reference\\lana_ref_segments\\004.wav",
+      "start_sec": 7.75,
+      "end_sec": 8.928,
+      "duration_sec": 1.177,
+      "source_duration_sec": 1.657
+    },
+    {
+      "text": "How dare you!",
+      "line_index": 4,
+      "is_line_final": false,
+      "file": "C:\\git\\qwen3-tts-cpp-streaming\\reference\\lana_ref_segments\\005.wav",
+      "start_sec": 9.678,
+      "end_sec": 10.76,
+      "duration_sec": 1.083,
+      "source_duration_sec": 1.657
+    },
+    {
+      "text": "Do you think I'm stupid?",
+      "line_index": 4,
+      "is_line_final": true,
+      "file": "C:\\git\\qwen3-tts-cpp-streaming\\reference\\lana_ref_segments\\006.wav",
+      "start_sec": 10.76,
+      "end_sec": 12.112,
+      "duration_sec": 1.352,
+      "source_duration_sec": 1.817
+    },
+    {
+      "text": "Please, don't hurt me.",
+      "line_index": 5,
+      "is_line_final": false,
+      "file": "C:\\git\\qwen3-tts-cpp-streaming\\reference\\lana_ref_segments\\007.wav",
+      "start_sec": 12.862,
+      "end_sec": 14.219,
+      "duration_sec": 1.356,
+      "source_duration_sec": 1.817
+    },
+    {
+      "text": "I'll give you what you want.",
+      "line_index": 5,
+      "is_line_final": false,
+      "file": "C:\\git\\qwen3-tts-cpp-streaming\\reference\\lana_ref_segments\\008.wav",
+      "start_sec": 14.219,
+      "end_sec": 15.442,
+      "duration_sec": 1.223,
+      "source_duration_sec": 1.737
+    },
+    {
+      "text": "Just leave me alone.",
+      "line_index": 5,
+      "is_line_final": true,
+      "file": "C:\\git\\qwen3-tts-cpp-streaming\\reference\\lana_ref_segments\\009.wav",
+      "start_sec": 15.442,
+      "end_sec": 16.875,
+      "duration_sec": 1.433,
+      "source_duration_sec": 2.057
+    },
+    {
+      "text": "Ew, that's revolting.",
+      "line_index": 6,
+      "is_line_final": false,
+      "file": "C:\\git\\qwen3-tts-cpp-streaming\\reference\\lana_ref_segments\\010.wav",
+      "start_sec": 17.625,
+      "end_sec": 19.509,
+      "duration_sec": 1.884,
+      "source_duration_sec": 2.457
+    },
+    {
+      "text": "Get rid of it.",
+      "line_index": 6,
+      "is_line_final": true,
+      "file": "C:\\git\\qwen3-tts-cpp-streaming\\reference\\lana_ref_segments\\011.wav",
+      "start_sec": 19.509,
+      "end_sec": 20.32,
+      "duration_sec": 0.811,
+      "source_duration_sec": 1.737
+    }
+  ]
+}
