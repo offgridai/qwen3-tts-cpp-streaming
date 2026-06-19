@@ -781,23 +781,23 @@ int main(int argc, char** argv) {
                 options.steady_split_decode_frames = 0;
             } else if (profile == "offgrid-callback") {
                 options.live_preroll_ms = 150;
-                options.first_tail_window_frames = 3;
+                options.first_tail_window_frames = 5;
                 options.ramp_tail_window_frames = 6;
                 options.ramp_tail_window_count = 0;
                 options.steady_tail_window_frames = 8;
-                options.context_frames = 3;
-                options.early_context_frames = 2;
+                options.context_frames = 2;
+                options.early_context_frames = 1;
                 options.early_context_window_count = 2;
-                options.final_context_frames = 4;
+                options.final_context_frames = 3;
                 options.adaptive_steady_windows = false;
                 options.adaptive_min_tail_window_frames = 6;
                 options.adaptive_low_watermark_ms = 220;
                 options.adaptive_high_watermark_ms = 520;
                 options.paced_audio_delivery = true;
-                options.delivery_chunk_ms = 40;
-                options.delivery_start_buffer_ms = 40;
-                options.delivery_target_lead_ms = 300;
-                options.steady_split_decode_frames = 4;
+                options.delivery_chunk_ms = 80;
+                options.delivery_start_buffer_ms = 80;
+                options.delivery_target_lead_ms = 350;
+                options.steady_split_decode_frames = 0;
             } else {
                 std::cerr << "Unknown --tts-profile '" << profile << "'. Expected realtime, memory-saver, ultra-low, or offgrid-callback.\n";
                 return 2;
