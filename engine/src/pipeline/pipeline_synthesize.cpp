@@ -1396,13 +1396,23 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                             }
 
                             const int64_t now_ms = get_time_ms();
+                            const size_t startup_target_samples = callback_driven_delivery
+                                ? std::max<size_t>(
+                                    delivery_chunk_samples,
+                                    (size_t) std::max<int64_t>(
+                                        1,
+                                        ((int64_t) sample_rate * std::max<int32_t>(1, params.delivery_target_lead_ms)) / 1000))
+                                : delivery_chunk_samples;
                             if (!delivery_state.playback_started) {
                                 if (!delivery_state.finalized && available < effective_delivery_start_buffer_samples) {
                                     delivery_state.cv.wait_for(lock, std::chrono::milliseconds(5));
                                     continue;
                                 }
 
-                                emit_count = std::min(available, delivery_chunk_samples);
+                                const size_t startup_emit_target = callback_driven_delivery
+                                    ? startup_target_samples
+                                    : delivery_chunk_samples;
+                                emit_count = std::min(available, startup_emit_target);
                                 delivery_state.playback_started = true;
                                 delivery_state.first_emit_samples = emit_count;
                                 delivery_state.first_emit_clock_ms = now_ms;
@@ -1430,6 +1440,15 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                                 const size_t emitted_ahead_samples = delivery_state.emitted_samples > elapsed_samples
                                     ? (delivery_state.emitted_samples - elapsed_samples)
                                     : 0;
+                                if (emitted_ahead_samples < startup_target_samples) {
+                                    const size_t startup_refill_needed =
+                                        std::max(delivery_chunk_samples, startup_target_samples - emitted_ahead_samples);
+                                    emit_count = std::min(available, startup_refill_needed);
+                                    delivery_state.next_emit_due_ms = std::max<int64_t>(
+                                        delivery_state.next_emit_due_ms,
+                                        now_ms + callback_burst_gap_ms);
+                                    break;
+                                }
                                 const int64_t burst_due_ms = delivery_state.previous_emit_clock_ms >= 0
                                     ? (delivery_state.previous_emit_clock_ms + callback_burst_gap_ms)
                                     : now_ms;

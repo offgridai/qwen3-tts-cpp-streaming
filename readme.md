@@ -186,12 +186,94 @@ python tools\voicedesign_to_wav.py `
   --output reference\lana_ref.wav
 ```
 
+For the cleaner reference-render path, prefer the high-fidelity preset:
+
+```powershell
+python tools\voicedesign_to_wav.py `
+  --instruct "A 30 year old woman with a rich feminine voice." `
+  --line "I was not expecting visitors this late. What a pleasure it is to meet you here." `
+  --output reference\lana_ref.wav `
+  --fidelity-preset high
+```
+
+That preset switches the helper to:
+
+- batch engine rendering instead of the streaming wrapper
+- per-sentence rendering with WAV concatenation
+- low-variance sampling defaults (`temperature=0`, `top-k=0`)
+
+It also writes a sidecar manifest next to the WAV describing the segment boundaries and render settings. Override `--render-path`, `--segmentation`, or the sampling flags if you want to run your own sweep.
+
+For cleaner but less deterministic renders, the helper can also generate several takes per sentence and keep the cleanest sentence take by detector score:
+
+```powershell
+python tools\voicedesign_to_wav.py `
+  --instruct "A 30 year old woman with a rich feminine voice." `
+  --line "I was not expecting visitors this late. What a pleasure it is to meet you here." `
+  --output reference\lana_ref.wav `
+  --fidelity-preset high `
+  --temperature 0.35 `
+  --top-k 16 `
+  --top-p 0.95 `
+  --takes-per-segment 6 `
+  --segment-gap-ms 120 `
+  --fade-ms 20
+```
+
+Useful knobs:
+
+- `--takes-per-segment N`: sample `N` candidates for each segment and keep the cleanest one
+- `--segment-gap-ms`: insert a short pause between concatenated segments
+- `--fade-ms`: soften segment edges to reduce join artifacts
+- `--consistency-mode anchor-clone`: generate one VoiceDesign anchor, extract a speaker embedding, then render the full stitched WAV with the base model for better cross-line consistency
+
+Recommended consistent multi-line reference render:
+
+```powershell
+python tools\voicedesign_to_wav.py `
+  --instruct "A 30 year old woman with a rich feminine voice." `
+  --line "I was not expecting visitors this late." `
+  --line "What a pleasure it is to meet you here." `
+  --line "I'm so sorry to hear about your loss. Its heartbreaking." `
+  --line "How dare you! Do you think I'm stupid?" `
+  --line "Please, don't hurt me. I'll give you what you want. Just leave me alone." `
+  --line "Ew, that's revolting. Get rid of it." `
+  --output reference\lana_ref.wav `
+  --fidelity-preset high `
+  --consistency-mode anchor-clone `
+  --trim-silence
+```
+
+In that mode, the high-fidelity defaults now assume:
+
+- `segmentation=per-line`
+- `temperature=0.75`
+- `top-k=16`
+- `top-p=0.9`
+- `segment-gap-ms=750`
+- `fade-ms=10`
+
 Extract a reusable speaker embedding JSON from the WAV:
 
 ```powershell
 python tools\wav_to_speaker_embedding.py `
   --input-wav reference\lana_ref.wav `
   --output-json reference\lana_1.7b_f16.json
+```
+
+If you want both reusable families out of the same anchor render, `voicedesign_to_wav.py`
+can export them directly during the anchor-clone pass:
+
+```powershell
+python tools\voicedesign_to_wav.py `
+  --instruct "A 30 year old woman with a rich feminine voice." `
+  --line "I was not expecting visitors this late." `
+  --output reference\lana_ref.wav `
+  --fidelity-preset high `
+  --consistency-mode anchor-clone `
+  --trim-silence `
+  --output-speaker-json-1_7b reference\lana_1.7b_f16.json `
+  --output-speaker-json-0_6b reference\lana_0.6b_f16.json
 ```
 
 Synthesize a smoke-test line from the JSON:
@@ -203,12 +285,50 @@ python tools\speaker_embedding_smoke_test.py `
   --text "I was not expecting visitors this late. What a pleasure it is to meet you here."
 ```
 
+Validate the same JSON through the silent streaming decode path instead of batch:
+
+```powershell
+python tools\speaker_embedding_smoke_test.py `
+  --input-json reference\lana_0.6b_f16.json `
+  --model-name qwen3-tts-0.6b-f16.gguf `
+  --render-mode stream `
+  --streaming-preset fidelity `
+  --output-wav examples\lana_stream_smoke_test.wav `
+  --analyze
+```
+
+Current streaming presets in that helper:
+
+- `default`: repo-default overlap/window settings
+- `fidelity`: more conservative overlap/context settings intended to stay closer to the cleaned reference voice
+- `fidelity-plus`: even larger overlap/context windows when you want to bias harder toward fidelity than latency
+
+Run a direct batch-vs-streaming A/B and detector report:
+
+```powershell
+python tools\streaming_quality_ab.py `
+  --input-json reference\lana_0.6b_f16.json `
+  --output-dir tools\stream_quality_runs\lana_ab `
+  --model-name qwen3-tts-0.6b-f16.gguf
+```
+
+Benchmark callback-buffer startup and sustained streaming rate without live speaker playback:
+
+```powershell
+python tools\streaming_callback_benchmark.py `
+  --input-json reference\lana_0.6b_f16.json `
+  --text "I was not expecting visitors this late. What a pleasure it is to meet you here. Did you know I offer sandwiches for sale?" `
+  --output-json tools\stream_quality_runs\callback_metrics.json
+```
+
 Notes:
 
 - the scripts auto-discover the usual `qwen3_streaming_cli.exe` and `tts_engine_cli.exe` build outputs
 - pass `--exe` if your binaries live somewhere else
 - `wav_to_speaker_embedding.py` uses a scratch text/WAV internally because `tts_engine_cli` still requires them even for embedding extraction
 - keep the embedding JSON matched to the same model family you plan to reuse
+- the streaming validation helpers use `tts_engine_cli --streaming-generate --no-play-streaming` so they exercise the incremental streaming decode path without driving live speaker playback
+- `streaming_callback_benchmark.py` uses `qwen3_streaming_cli --simulate-stream-callback --no-play-streaming` and reports the time to the first full downstream buffer, using `350 ms` by default
 
 ## Streaming Hint Track
 
