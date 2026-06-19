@@ -3,8 +3,8 @@
 Summarize and compare GGML debug trace dumps from TTSTransformer.
 
 Usage:
-  python scripts/debug_trace_report.py --trace-a trace_1p7
-  python scripts/debug_trace_report.py --trace-a trace_cpp --trace-b trace_py
+  python tools/debug_trace_report.py --trace-a trace_1p7
+  python tools/debug_trace_report.py --trace-a trace_cpp --trace-b trace_py
 """
 
 from __future__ import annotations

@@ -168,6 +168,48 @@ If you want callback-style diagnostics without caring about the streamed samples
 --simulate-stream-callback --dump-streaming-overlap
 ```
 
+### VoiceDesign To Reusable Speaker Embedding
+
+The helper scripts now live under `tools/` and wrap the common workflow:
+
+1. generate a reference WAV with the `1.7b` VoiceDesign model
+2. extract a reusable speaker embedding JSON from that WAV with the `1.7b` base model
+3. synthesize a verification line from the JSON to confirm the voice is preserved
+
+Generate a reference WAV from multiple English lines:
+
+```powershell
+python tools\voicedesign_to_wav.py `
+  --instruct "A 30 year old woman with a rich feminine voice." `
+  --line "I was not expecting visitors this late." `
+  --line "What a pleasure it is to meet you here." `
+  --output reference\lana_ref.wav
+```
+
+Extract a reusable speaker embedding JSON from the WAV:
+
+```powershell
+python tools\wav_to_speaker_embedding.py `
+  --input-wav reference\lana_ref.wav `
+  --output-json reference\lana_1.7b_f16.json
+```
+
+Synthesize a smoke-test line from the JSON:
+
+```powershell
+python tools\speaker_embedding_smoke_test.py `
+  --input-json reference\lana_1.7b_f16.json `
+  --output-wav examples\lana_smoke_test.wav `
+  --text "I was not expecting visitors this late. What a pleasure it is to meet you here."
+```
+
+Notes:
+
+- the scripts auto-discover the usual `qwen3_streaming_cli.exe` and `tts_engine_cli.exe` build outputs
+- pass `--exe` if your binaries live somewhere else
+- `wav_to_speaker_embedding.py` uses a scratch text/WAV internally because `tts_engine_cli` still requires them even for embedding extraction
+- keep the embedding JSON matched to the same model family you plan to reuse
+
 ## Streaming Hint Track
 
 The engine and wrapper now support a lightweight streaming hint track alongside

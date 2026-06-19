@@ -3,7 +3,7 @@
 Convert Qwen3-TTS-Tokenizer-12Hz model to GGUF format.
 
 Usage:
-    python scripts/convert_tokenizer_to_gguf.py \
+    python tools/convert_tokenizer_to_gguf.py \
         --input models/Qwen3-TTS-Tokenizer-12Hz \
         --output models/qwen3-tts-tokenizer-f16.gguf \
         --type f16
@@ -25,7 +25,8 @@ from safetensors import safe_open
 from tqdm import tqdm
 
 # Add gguf-py to path (if available)
-GGUF_PY_PATH = Path(__file__).resolve().parents[1] / "gguf-py"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+GGUF_PY_PATH = PROJECT_ROOT / "engine" / "gguf-py"
 try:
     if GGUF_PY_PATH.exists():
         sys.path.insert(0, str(GGUF_PY_PATH))

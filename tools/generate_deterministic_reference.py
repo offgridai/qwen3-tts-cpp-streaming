@@ -7,7 +7,7 @@ This script forces float32 + greedy decoding and dumps intermediate tensors,
 including the exact prefill embedding fed into the talker transformer.
 
 Usage:
-    /root/.local/bin/uv run python scripts/generate_deterministic_reference.py
+    /root/.local/bin/uv run python tools/generate_deterministic_reference.py
 """
 
 from __future__ import annotations

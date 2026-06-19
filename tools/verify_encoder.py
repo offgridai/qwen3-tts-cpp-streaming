@@ -3,7 +3,7 @@
 Verify speaker encoder output against Python reference.
 
 Usage:
-    python scripts/verify_encoder.py --audio clone.wav --reference reference/ref_audio_embedding.bin
+    python tools/verify_encoder.py --audio clone.wav --reference reference/ref_audio_embedding.bin
 """
 
 import argparse

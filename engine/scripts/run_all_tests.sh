@@ -262,14 +262,14 @@ log "============================================"
 log ""
 
 log "--- Test 6.1: E2E Comparison ---"
-if command -v uv &>/dev/null && [[ -f "scripts/compare_e2e.py" ]]; then
+if command -v uv &>/dev/null && [[ -f "tools/compare_e2e.py" ]]; then
     dep_check=$(timeout 60 uv run python -c "import qwen_tts" 2>&1)
     dep_rc=$?
     if [[ $dep_rc -ne 0 ]]; then
         skip "E2E comparison (python dependency 'qwen_tts' not available in uv environment)"
         log_output_tail "$dep_check" 10
     else
-        output=$(timeout 600 uv run python scripts/compare_e2e.py 2>&1)
+        output=$(timeout 600 uv run python tools/compare_e2e.py 2>&1)
         rc=$?
         if [[ $rc -eq 0 ]] && echo "$output" | grep -q "PASS"; then
             pass "E2E comparison test"

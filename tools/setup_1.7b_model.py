@@ -52,7 +52,7 @@ def main():
     base_gguf = MODELS_DIR / "qwen3-tts-1.7b-base-f16.gguf"
     print(f"Converting 1.7B Base to GGUF: {base_gguf}...")
     run_cmd([
-        VENV_PYTHON, (REPO_ROOT / "scripts" / "convert_tts_to_gguf.py").as_posix(),
+        VENV_PYTHON, (REPO_ROOT / "tools" / "convert_tts_to_gguf.py").as_posix(),
         "--input", base_17b_dir.as_posix(),
         "--output", base_gguf.as_posix(),
         "--type", "f16"
@@ -62,7 +62,7 @@ def main():
     custom_gguf = MODELS_DIR / "qwen3-tts-1.7b-customvoice-f16.gguf"
     print(f"Converting 1.7B CustomVoice to GGUF: {custom_gguf}...")
     run_cmd([
-        VENV_PYTHON, (REPO_ROOT / "scripts" / "convert_tts_to_gguf.py").as_posix(),
+        VENV_PYTHON, (REPO_ROOT / "tools" / "convert_tts_to_gguf.py").as_posix(),
         "--input", custom_voice_dir.as_posix(),
         "--output", custom_gguf.as_posix(),
         "--type", "f16"
@@ -73,7 +73,7 @@ def main():
     if not tokenizer_gguf.exists():
         print(f"Converting Tokenizer to GGUF: {tokenizer_gguf}...")
         run_cmd([
-            VENV_PYTHON, (REPO_ROOT / "scripts" / "convert_tokenizer_to_gguf.py").as_posix(),
+            VENV_PYTHON, (REPO_ROOT / "tools" / "convert_tokenizer_to_gguf.py").as_posix(),
             "--input", tokenizer_dir.as_posix(),
             "--output", tokenizer_gguf.as_posix(),
             "--type", "f16"

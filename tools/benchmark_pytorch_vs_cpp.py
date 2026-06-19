@@ -693,7 +693,9 @@ def main() -> int:
             raise SystemExit(f"Unsupported backend: {args.backend}")
         return 0
 
-    python_exe = PROJECT_ROOT / ".venv" / "bin" / "python"
+    python_exe = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
+    if not python_exe.exists():
+        python_exe = PROJECT_ROOT / ".venv" / "bin" / "python"
     if not python_exe.exists():
         raise SystemExit(f"Missing venv python: {python_exe}")
     if not CPP_CLI.exists():

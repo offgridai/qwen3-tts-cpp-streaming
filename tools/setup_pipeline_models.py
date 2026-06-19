@@ -10,10 +10,10 @@ artifacts needed by the final C++ pipeline:
 - models/coreml/code_predictor.mlpackage (optional, macOS)
 
 Example:
-  python scripts/setup_pipeline_models.py
+  python tools/setup_pipeline_models.py
 
 Minimal usage for CI/offline conversion:
-  python scripts/setup_pipeline_models.py --skip-download
+  python tools/setup_pipeline_models.py --skip-download
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from typing import Iterable, Optional
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_DIR = REPO_ROOT / "scripts"
+SCRIPTS_DIR = REPO_ROOT / "tools"
 
 BASE_REPO_IDS = [
     "Qwen/Qwen3-TTS-12Hz-0.6B-Base",

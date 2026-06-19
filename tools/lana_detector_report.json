@@ -1,0 +1,1058 @@
+[
+  {
+    "file": "C:\\git\\qwen3-tts-cpp-streaming\\tools\\lana_ref.wav",
+    "duration_sec": 24.617,
+    "frame_ms": 40.0,
+    "hop_ms": 20.0,
+    "voice_frames": 757,
+    "score_threshold": 1.48247,
+    "top_suspect_regions": [
+      {
+        "start_sec": 8.98,
+        "end_sec": 9.14,
+        "dur_sec": 0.16,
+        "mean_score": 1.59,
+        "max_score": 1.703,
+        "mean_rms": 0.0132,
+        "mean_centroid_hz": 1805.3,
+        "mean_flatness": 0.5157,
+        "mean_hi_ratio": 0.2334
+      },
+      {
+        "start_sec": 22.1,
+        "end_sec": 22.2,
+        "dur_sec": 0.1,
+        "mean_score": 1.801,
+        "max_score": 2.069,
+        "mean_rms": 0.0144,
+        "mean_centroid_hz": 2106.0,
+        "mean_flatness": 0.3961,
+        "mean_hi_ratio": 0.3742
+      },
+      {
+        "start_sec": 1.02,
+        "end_sec": 1.12,
+        "dur_sec": 0.1,
+        "mean_score": 1.658,
+        "max_score": 1.819,
+        "mean_rms": 0.013,
+        "mean_centroid_hz": 1687.6,
+        "mean_flatness": 0.4883,
+        "mean_hi_ratio": 0.306
+      },
+      {
+        "start_sec": 7.28,
+        "end_sec": 7.38,
+        "dur_sec": 0.1,
+        "mean_score": 1.6,
+        "max_score": 1.734,
+        "mean_rms": 0.0266,
+        "mean_centroid_hz": 1613.2,
+        "mean_flatness": 0.595,
+        "mean_hi_ratio": 0.2051
+      },
+      {
+        "start_sec": 4.7,
+        "end_sec": 4.78,
+        "dur_sec": 0.08,
+        "mean_score": 1.614,
+        "max_score": 1.758,
+        "mean_rms": 0.0315,
+        "mean_centroid_hz": 1753.5,
+        "mean_flatness": 0.5245,
+        "mean_hi_ratio": 0.2323
+      },
+      {
+        "start_sec": 14.76,
+        "end_sec": 14.84,
+        "dur_sec": 0.08,
+        "mean_score": 1.602,
+        "max_score": 1.609,
+        "mean_rms": 0.0338,
+        "mean_centroid_hz": 1776.0,
+        "mean_flatness": 0.4928,
+        "mean_hi_ratio": 0.2452
+      },
+      {
+        "start_sec": 0.72,
+        "end_sec": 0.78,
+        "dur_sec": 0.06,
+        "mean_score": 1.615,
+        "max_score": 1.636,
+        "mean_rms": 0.0475,
+        "mean_centroid_hz": 1963.0,
+        "mean_flatness": 0.3969,
+        "mean_hi_ratio": 0.3104
+      },
+      {
+        "start_sec": 23.58,
+        "end_sec": 23.64,
+        "dur_sec": 0.06,
+        "mean_score": 1.594,
+        "max_score": 1.692,
+        "mean_rms": 0.0134,
+        "mean_centroid_hz": 1838.6,
+        "mean_flatness": 0.5408,
+        "mean_hi_ratio": 0.1941
+      },
+      {
+        "start_sec": 17.7,
+        "end_sec": 17.74,
+        "dur_sec": 0.04,
+        "mean_score": 2.338,
+        "max_score": 2.338,
+        "mean_rms": 0.0197,
+        "mean_centroid_hz": 2496.6,
+        "mean_flatness": 0.2314,
+        "mean_hi_ratio": 0.7203
+      },
+      {
+        "start_sec": 10.06,
+        "end_sec": 10.1,
+        "dur_sec": 0.04,
+        "mean_score": 2.217,
+        "max_score": 2.217,
+        "mean_rms": 0.0108,
+        "mean_centroid_hz": 2234.1,
+        "mean_flatness": 0.2917,
+        "mean_hi_ratio": 0.6842
+      }
+    ],
+    "top_frames": [
+      {
+        "time_sec": 17.7,
+        "score": 2.338,
+        "rms": 0.0197,
+        "centroid_hz": 2496.6,
+        "flatness": 0.2314,
+        "hi_ratio": 0.7203
+      },
+      {
+        "time_sec": 10.06,
+        "score": 2.217,
+        "rms": 0.0108,
+        "centroid_hz": 2234.1,
+        "flatness": 0.2917,
+        "hi_ratio": 0.6842
+      },
+      {
+        "time_sec": 22.16,
+        "score": 2.069,
+        "rms": 0.0103,
+        "centroid_hz": 2352.8,
+        "flatness": 0.2956,
+        "hi_ratio": 0.5473
+      },
+      {
+        "time_sec": 1.98,
+        "score": 1.849,
+        "rms": 0.0233,
+        "centroid_hz": 1844.5,
+        "flatness": 0.5349,
+        "hi_ratio": 0.3281
+      },
+      {
+        "time_sec": 1.02,
+        "score": 1.819,
+        "rms": 0.0128,
+        "centroid_hz": 2178.8,
+        "flatness": 0.4306,
+        "hi_ratio": 0.3208
+      },
+      {
+        "time_sec": 7.88,
+        "score": 1.786,
+        "rms": 0.0154,
+        "centroid_hz": 1746.4,
+        "flatness": 0.5514,
+        "hi_ratio": 0.3083
+      },
+      {
+        "time_sec": 4.72,
+        "score": 1.758,
+        "rms": 0.0327,
+        "centroid_hz": 1964.9,
+        "flatness": 0.5409,
+        "hi_ratio": 0.2362
+      },
+      {
+        "time_sec": 7.34,
+        "score": 1.734,
+        "rms": 0.0267,
+        "centroid_hz": 1703.9,
+        "flatness": 0.6001,
+        "hi_ratio": 0.249
+      },
+      {
+        "time_sec": 8.98,
+        "score": 1.703,
+        "rms": 0.015,
+        "centroid_hz": 1734.5,
+        "flatness": 0.554,
+        "hi_ratio": 0.2777
+      },
+      {
+        "time_sec": 23.58,
+        "score": 1.692,
+        "rms": 0.0101,
+        "centroid_hz": 1876.9,
+        "flatness": 0.5343,
+        "hi_ratio": 0.2509
+      }
+    ],
+    "top_halfsec_centers": [
+      {
+        "center_sec": 7.1,
+        "mean_score": 0.876,
+        "mean_rms": 0.0756,
+        "mean_centroid_hz": 1094.5
+      },
+      {
+        "center_sec": 7.08,
+        "mean_score": 0.839,
+        "mean_rms": 0.0791,
+        "mean_centroid_hz": 1054.3
+      },
+      {
+        "center_sec": 7.12,
+        "mean_score": 0.834,
+        "mean_rms": 0.0762,
+        "mean_centroid_hz": 1047.6
+      },
+      {
+        "center_sec": 7.06,
+        "mean_score": 0.789,
+        "mean_rms": 0.0857,
+        "mean_centroid_hz": 991.2
+      },
+      {
+        "center_sec": 7.14,
+        "mean_score": 0.776,
+        "mean_rms": 0.0789,
+        "mean_centroid_hz": 995.7
+      },
+      {
+        "center_sec": 0.88,
+        "mean_score": 0.757,
+        "mean_rms": 0.0315,
+        "mean_centroid_hz": 1053.7
+      },
+      {
+        "center_sec": 0.9,
+        "mean_score": 0.757,
+        "mean_rms": 0.0352,
+        "mean_centroid_hz": 1062.9
+      },
+      {
+        "center_sec": 0.86,
+        "mean_score": 0.755,
+        "mean_rms": 0.0301,
+        "mean_centroid_hz": 1051.2
+      },
+      {
+        "center_sec": 7.04,
+        "mean_score": 0.729,
+        "mean_rms": 0.0938,
+        "mean_centroid_hz": 934.4
+      },
+      {
+        "center_sec": 7.16,
+        "mean_score": 0.724,
+        "mean_rms": 0.0822,
+        "mean_centroid_hz": 955.4
+      }
+    ]
+  },
+  {
+    "file": "C:\\git\\qwen3-tts-cpp-streaming\\tools\\lana_ref2.wav",
+    "duration_sec": 21.097,
+    "frame_ms": 40.0,
+    "hop_ms": 20.0,
+    "voice_frames": 673,
+    "score_threshold": 1.652161,
+    "top_suspect_regions": [
+      {
+        "start_sec": 1.52,
+        "end_sec": 1.74,
+        "dur_sec": 0.22,
+        "mean_score": 1.832,
+        "max_score": 1.9,
+        "mean_rms": 0.0308,
+        "mean_centroid_hz": 2059.0,
+        "mean_flatness": 0.4591,
+        "mean_hi_ratio": 0.3323
+      },
+      {
+        "start_sec": 8.4,
+        "end_sec": 8.56,
+        "dur_sec": 0.16,
+        "mean_score": 1.722,
+        "max_score": 1.752,
+        "mean_rms": 0.0346,
+        "mean_centroid_hz": 2018.1,
+        "mean_flatness": 0.3925,
+        "mean_hi_ratio": 0.3603
+      },
+      {
+        "start_sec": 12.16,
+        "end_sec": 12.26,
+        "dur_sec": 0.1,
+        "mean_score": 1.796,
+        "max_score": 1.928,
+        "mean_rms": 0.0198,
+        "mean_centroid_hz": 1766.2,
+        "mean_flatness": 0.587,
+        "mean_hi_ratio": 0.2798
+      },
+      {
+        "start_sec": 4.1,
+        "end_sec": 4.18,
+        "dur_sec": 0.08,
+        "mean_score": 2.146,
+        "max_score": 2.18,
+        "mean_rms": 0.0276,
+        "mean_centroid_hz": 2190.0,
+        "mean_flatness": 0.3718,
+        "mean_hi_ratio": 0.5578
+      },
+      {
+        "start_sec": 7.34,
+        "end_sec": 7.42,
+        "dur_sec": 0.08,
+        "mean_score": 1.862,
+        "max_score": 1.933,
+        "mean_rms": 0.0262,
+        "mean_centroid_hz": 2004.2,
+        "mean_flatness": 0.4881,
+        "mean_hi_ratio": 0.3401
+      },
+      {
+        "start_sec": 6.42,
+        "end_sec": 6.5,
+        "dur_sec": 0.08,
+        "mean_score": 1.838,
+        "max_score": 1.845,
+        "mean_rms": 0.0243,
+        "mean_centroid_hz": 1911.3,
+        "mean_flatness": 0.4071,
+        "mean_hi_ratio": 0.4457
+      },
+      {
+        "start_sec": 9.02,
+        "end_sec": 9.08,
+        "dur_sec": 0.06,
+        "mean_score": 2.125,
+        "max_score": 2.334,
+        "mean_rms": 0.0121,
+        "mean_centroid_hz": 2204.8,
+        "mean_flatness": 0.3097,
+        "mean_hi_ratio": 0.6198
+      },
+      {
+        "start_sec": 13.52,
+        "end_sec": 13.58,
+        "dur_sec": 0.06,
+        "mean_score": 1.867,
+        "max_score": 1.987,
+        "mean_rms": 0.0204,
+        "mean_centroid_hz": 2007.2,
+        "mean_flatness": 0.4421,
+        "mean_hi_ratio": 0.3933
+      },
+      {
+        "start_sec": 3.62,
+        "end_sec": 3.68,
+        "dur_sec": 0.06,
+        "mean_score": 1.837,
+        "max_score": 1.873,
+        "mean_rms": 0.0168,
+        "mean_centroid_hz": 1859.9,
+        "mean_flatness": 0.5686,
+        "mean_hi_ratio": 0.2826
+      },
+      {
+        "start_sec": 18.66,
+        "end_sec": 18.7,
+        "dur_sec": 0.04,
+        "mean_score": 2.415,
+        "max_score": 2.415,
+        "mean_rms": 0.0134,
+        "mean_centroid_hz": 1945.6,
+        "mean_flatness": 0.7608,
+        "mean_hi_ratio": 0.3772
+      }
+    ],
+    "top_frames": [
+      {
+        "time_sec": 18.66,
+        "score": 2.415,
+        "rms": 0.0134,
+        "centroid_hz": 1945.6,
+        "flatness": 0.7608,
+        "hi_ratio": 0.3772
+      },
+      {
+        "time_sec": 9.02,
+        "score": 2.334,
+        "rms": 0.0096,
+        "centroid_hz": 2463.6,
+        "flatness": 0.2315,
+        "hi_ratio": 0.7389
+      },
+      {
+        "time_sec": 17.94,
+        "score": 2.245,
+        "rms": 0.0231,
+        "centroid_hz": 2336.3,
+        "flatness": 0.4468,
+        "hi_ratio": 0.4969
+      },
+      {
+        "time_sec": 4.12,
+        "score": 2.18,
+        "rms": 0.029,
+        "centroid_hz": 2243.3,
+        "flatness": 0.3648,
+        "hi_ratio": 0.5699
+      },
+      {
+        "time_sec": 4.1,
+        "score": 2.149,
+        "rms": 0.027,
+        "centroid_hz": 2130.2,
+        "flatness": 0.3779,
+        "hi_ratio": 0.5634
+      },
+      {
+        "time_sec": 4.14,
+        "score": 2.11,
+        "rms": 0.0266,
+        "centroid_hz": 2196.4,
+        "flatness": 0.3728,
+        "hi_ratio": 0.54
+      },
+      {
+        "time_sec": 13.52,
+        "score": 1.987,
+        "rms": 0.0219,
+        "centroid_hz": 2249.8,
+        "flatness": 0.4009,
+        "hi_ratio": 0.4221
+      },
+      {
+        "time_sec": 7.36,
+        "score": 1.933,
+        "rms": 0.0268,
+        "centroid_hz": 2093.0,
+        "flatness": 0.4805,
+        "hi_ratio": 0.3596
+      },
+      {
+        "time_sec": 12.16,
+        "score": 1.928,
+        "rms": 0.0193,
+        "centroid_hz": 1905.5,
+        "flatness": 0.5515,
+        "hi_ratio": 0.3456
+      },
+      {
+        "time_sec": 9.04,
+        "score": 1.915,
+        "rms": 0.0145,
+        "centroid_hz": 1946.0,
+        "flatness": 0.388,
+        "hi_ratio": 0.5008
+      }
+    ],
+    "top_halfsec_centers": [
+      {
+        "center_sec": 5.74,
+        "mean_score": 0.902,
+        "mean_rms": 0.0719,
+        "mean_centroid_hz": 1117.8
+      },
+      {
+        "center_sec": 5.7,
+        "mean_score": 0.899,
+        "mean_rms": 0.0721,
+        "mean_centroid_hz": 1109.7
+      },
+      {
+        "center_sec": 5.72,
+        "mean_score": 0.884,
+        "mean_rms": 0.0721,
+        "mean_centroid_hz": 1110.0
+      },
+      {
+        "center_sec": 5.68,
+        "mean_score": 0.876,
+        "mean_rms": 0.0728,
+        "mean_centroid_hz": 1078.6
+      },
+      {
+        "center_sec": 5.76,
+        "mean_score": 0.871,
+        "mean_rms": 0.0738,
+        "mean_centroid_hz": 1075.8
+      },
+      {
+        "center_sec": 5.66,
+        "mean_score": 0.823,
+        "mean_rms": 0.076,
+        "mean_centroid_hz": 1022.9
+      },
+      {
+        "center_sec": 5.48,
+        "mean_score": 0.818,
+        "mean_rms": 0.0812,
+        "mean_centroid_hz": 1038.3
+      },
+      {
+        "center_sec": 5.46,
+        "mean_score": 0.815,
+        "mean_rms": 0.076,
+        "mean_centroid_hz": 1073.4
+      },
+      {
+        "center_sec": 5.78,
+        "mean_score": 0.815,
+        "mean_rms": 0.0778,
+        "mean_centroid_hz": 1027.3
+      },
+      {
+        "center_sec": 5.44,
+        "mean_score": 0.809,
+        "mean_rms": 0.0699,
+        "mean_centroid_hz": 1079.1
+      }
+    ]
+  },
+  {
+    "file": "C:\\git\\qwen3-tts-cpp-streaming\\tools\\lana_ref3.wav",
+    "duration_sec": 22.217,
+    "frame_ms": 40.0,
+    "hop_ms": 20.0,
+    "voice_frames": 688,
+    "score_threshold": 1.574638,
+    "top_suspect_regions": [
+      {
+        "start_sec": 5.76,
+        "end_sec": 5.92,
+        "dur_sec": 0.16,
+        "mean_score": 1.712,
+        "max_score": 1.812,
+        "mean_rms": 0.0258,
+        "mean_centroid_hz": 1824.4,
+        "mean_flatness": 0.5319,
+        "mean_hi_ratio": 0.273
+      },
+      {
+        "start_sec": 0.72,
+        "end_sec": 0.84,
+        "dur_sec": 0.12,
+        "mean_score": 1.888,
+        "max_score": 2.11,
+        "mean_rms": 0.0244,
+        "mean_centroid_hz": 2173.9,
+        "mean_flatness": 0.3858,
+        "mean_hi_ratio": 0.4089
+      },
+      {
+        "start_sec": 8.64,
+        "end_sec": 8.76,
+        "dur_sec": 0.12,
+        "mean_score": 1.87,
+        "max_score": 2.081,
+        "mean_rms": 0.0442,
+        "mean_centroid_hz": 1987.3,
+        "mean_flatness": 0.2927,
+        "mean_hi_ratio": 0.5616
+      },
+      {
+        "start_sec": 14.74,
+        "end_sec": 14.84,
+        "dur_sec": 0.1,
+        "mean_score": 1.781,
+        "max_score": 1.79,
+        "mean_rms": 0.0187,
+        "mean_centroid_hz": 1671.6,
+        "mean_flatness": 0.6488,
+        "mean_hi_ratio": 0.1955
+      },
+      {
+        "start_sec": 7.74,
+        "end_sec": 7.84,
+        "dur_sec": 0.1,
+        "mean_score": 1.699,
+        "max_score": 1.731,
+        "mean_rms": 0.0195,
+        "mean_centroid_hz": 1825.2,
+        "mean_flatness": 0.5346,
+        "mean_hi_ratio": 0.2636
+      },
+      {
+        "start_sec": 0.3,
+        "end_sec": 0.38,
+        "dur_sec": 0.08,
+        "mean_score": 1.961,
+        "max_score": 2.097,
+        "mean_rms": 0.0256,
+        "mean_centroid_hz": 2073.3,
+        "mean_flatness": 0.4222,
+        "mean_hi_ratio": 0.423
+      },
+      {
+        "start_sec": 13.12,
+        "end_sec": 13.18,
+        "dur_sec": 0.06,
+        "mean_score": 1.818,
+        "max_score": 1.915,
+        "mean_rms": 0.0321,
+        "mean_centroid_hz": 1878.4,
+        "mean_flatness": 0.52,
+        "mean_hi_ratio": 0.3186
+      },
+      {
+        "start_sec": 1.84,
+        "end_sec": 1.9,
+        "dur_sec": 0.06,
+        "mean_score": 1.752,
+        "max_score": 1.793,
+        "mean_rms": 0.012,
+        "mean_centroid_hz": 1863.7,
+        "mean_flatness": 0.5334,
+        "mean_hi_ratio": 0.2835
+      },
+      {
+        "start_sec": 21.3,
+        "end_sec": 21.34,
+        "dur_sec": 0.04,
+        "mean_score": 2.596,
+        "max_score": 2.596,
+        "mean_rms": 0.0128,
+        "mean_centroid_hz": 2832.2,
+        "mean_flatness": 0.058,
+        "mean_hi_ratio": 0.9466
+      },
+      {
+        "start_sec": 16.22,
+        "end_sec": 16.26,
+        "dur_sec": 0.04,
+        "mean_score": 2.112,
+        "max_score": 2.112,
+        "mean_rms": 0.016,
+        "mean_centroid_hz": 2230.9,
+        "mean_flatness": 0.4839,
+        "mean_hi_ratio": 0.4088
+      }
+    ],
+    "top_frames": [
+      {
+        "time_sec": 21.3,
+        "score": 2.596,
+        "rms": 0.0128,
+        "centroid_hz": 2832.2,
+        "flatness": 0.058,
+        "hi_ratio": 0.9466
+      },
+      {
+        "time_sec": 16.22,
+        "score": 2.112,
+        "rms": 0.016,
+        "centroid_hz": 2230.9,
+        "flatness": 0.4839,
+        "hi_ratio": 0.4088
+      },
+      {
+        "time_sec": 0.74,
+        "score": 2.11,
+        "rms": 0.0289,
+        "centroid_hz": 2391.3,
+        "flatness": 0.2684,
+        "hi_ratio": 0.586
+      },
+      {
+        "time_sec": 0.34,
+        "score": 2.097,
+        "rms": 0.0228,
+        "centroid_hz": 2154.2,
+        "flatness": 0.4024,
+        "hi_ratio": 0.5164
+      },
+      {
+        "time_sec": 8.7,
+        "score": 2.081,
+        "rms": 0.0581,
+        "centroid_hz": 2267.1,
+        "flatness": 0.1313,
+        "hi_ratio": 0.7536
+      },
+      {
+        "time_sec": 0.72,
+        "score": 2.018,
+        "rms": 0.018,
+        "centroid_hz": 2157.7,
+        "flatness": 0.4104,
+        "hi_ratio": 0.4602
+      },
+      {
+        "time_sec": 8.66,
+        "score": 2.009,
+        "rms": 0.0363,
+        "centroid_hz": 2066.3,
+        "flatness": 0.2675,
+        "hi_ratio": 0.6325
+      },
+      {
+        "time_sec": 13.12,
+        "score": 1.915,
+        "rms": 0.035,
+        "centroid_hz": 1999.0,
+        "flatness": 0.5353,
+        "hi_ratio": 0.3144
+      },
+      {
+        "time_sec": 0.3,
+        "score": 1.907,
+        "rms": 0.0384,
+        "centroid_hz": 1961.6,
+        "flatness": 0.4307,
+        "hi_ratio": 0.3738
+      },
+      {
+        "time_sec": 0.32,
+        "score": 1.88,
+        "rms": 0.0156,
+        "centroid_hz": 2104.1,
+        "flatness": 0.4335,
+        "hi_ratio": 0.3789
+      }
+    ],
+    "top_halfsec_centers": [
+      {
+        "center_sec": 8.88,
+        "mean_score": 0.867,
+        "mean_rms": 0.0347,
+        "mean_centroid_hz": 1424.2
+      },
+      {
+        "center_sec": 8.86,
+        "mean_score": 0.859,
+        "mean_rms": 0.0295,
+        "mean_centroid_hz": 1410.6
+      },
+      {
+        "center_sec": 8.84,
+        "mean_score": 0.853,
+        "mean_rms": 0.0242,
+        "mean_centroid_hz": 1394.6
+      },
+      {
+        "center_sec": 5.98,
+        "mean_score": 0.847,
+        "mean_rms": 0.0593,
+        "mean_centroid_hz": 1076.5
+      },
+      {
+        "center_sec": 8.82,
+        "mean_score": 0.847,
+        "mean_rms": 0.0199,
+        "mean_centroid_hz": 1377.7
+      },
+      {
+        "center_sec": 5.96,
+        "mean_score": 0.838,
+        "mean_rms": 0.0589,
+        "mean_centroid_hz": 1073.2
+      },
+      {
+        "center_sec": 6.0,
+        "mean_score": 0.835,
+        "mean_rms": 0.0596,
+        "mean_centroid_hz": 1069.8
+      },
+      {
+        "center_sec": 8.8,
+        "mean_score": 0.833,
+        "mean_rms": 0.0175,
+        "mean_centroid_hz": 1356.3
+      },
+      {
+        "center_sec": 5.94,
+        "mean_score": 0.821,
+        "mean_rms": 0.0581,
+        "mean_centroid_hz": 1051.8
+      },
+      {
+        "center_sec": 8.78,
+        "mean_score": 0.814,
+        "mean_rms": 0.0165,
+        "mean_centroid_hz": 1315.3
+      }
+    ]
+  },
+  {
+    "file": "C:\\git\\qwen3-tts-cpp-streaming\\tools\\lana_ref4.wav",
+    "duration_sec": 21.417,
+    "frame_ms": 40.0,
+    "hop_ms": 20.0,
+    "voice_frames": 669,
+    "score_threshold": 1.631176,
+    "top_suspect_regions": [
+      {
+        "start_sec": 5.86,
+        "end_sec": 6.02,
+        "dur_sec": 0.16,
+        "mean_score": 1.795,
+        "max_score": 1.896,
+        "mean_rms": 0.0326,
+        "mean_centroid_hz": 1920.7,
+        "mean_flatness": 0.4775,
+        "mean_hi_ratio": 0.3274
+      },
+      {
+        "start_sec": 12.12,
+        "end_sec": 12.26,
+        "dur_sec": 0.14,
+        "mean_score": 1.817,
+        "max_score": 1.986,
+        "mean_rms": 0.0268,
+        "mean_centroid_hz": 1890.7,
+        "mean_flatness": 0.5299,
+        "mean_hi_ratio": 0.3082
+      },
+      {
+        "start_sec": 6.36,
+        "end_sec": 6.5,
+        "dur_sec": 0.14,
+        "mean_score": 1.683,
+        "max_score": 1.723,
+        "mean_rms": 0.0264,
+        "mean_centroid_hz": 1851.8,
+        "mean_flatness": 0.5028,
+        "mean_hi_ratio": 0.2582
+      },
+      {
+        "start_sec": 8.84,
+        "end_sec": 8.94,
+        "dur_sec": 0.1,
+        "mean_score": 1.842,
+        "max_score": 1.871,
+        "mean_rms": 0.0093,
+        "mean_centroid_hz": 2028.2,
+        "mean_flatness": 0.2844,
+        "mean_hi_ratio": 0.5461
+      },
+      {
+        "start_sec": 19.28,
+        "end_sec": 19.36,
+        "dur_sec": 0.08,
+        "mean_score": 1.83,
+        "max_score": 2.174,
+        "mean_rms": 0.0247,
+        "mean_centroid_hz": 2155.7,
+        "mean_flatness": 0.3503,
+        "mean_hi_ratio": 0.4248
+      },
+      {
+        "start_sec": 4.34,
+        "end_sec": 4.42,
+        "dur_sec": 0.08,
+        "mean_score": 1.817,
+        "max_score": 1.986,
+        "mean_rms": 0.0134,
+        "mean_centroid_hz": 1990.6,
+        "mean_flatness": 0.4847,
+        "mean_hi_ratio": 0.3258
+      },
+      {
+        "start_sec": 4.86,
+        "end_sec": 4.94,
+        "dur_sec": 0.08,
+        "mean_score": 1.691,
+        "max_score": 1.739,
+        "mean_rms": 0.0089,
+        "mean_centroid_hz": 1909.5,
+        "mean_flatness": 0.4395,
+        "mean_hi_ratio": 0.34
+      },
+      {
+        "start_sec": 13.58,
+        "end_sec": 13.64,
+        "dur_sec": 0.06,
+        "mean_score": 1.739,
+        "max_score": 1.821,
+        "mean_rms": 0.0168,
+        "mean_centroid_hz": 2089.5,
+        "mean_flatness": 0.4369,
+        "mean_hi_ratio": 0.3039
+      },
+      {
+        "start_sec": 7.42,
+        "end_sec": 7.46,
+        "dur_sec": 0.04,
+        "mean_score": 1.929,
+        "max_score": 1.929,
+        "mean_rms": 0.0175,
+        "mean_centroid_hz": 2116.8,
+        "mean_flatness": 0.4327,
+        "mean_hi_ratio": 0.4038
+      },
+      {
+        "start_sec": 14.34,
+        "end_sec": 14.38,
+        "dur_sec": 0.04,
+        "mean_score": 1.926,
+        "max_score": 1.926,
+        "mean_rms": 0.0108,
+        "mean_centroid_hz": 2008.4,
+        "mean_flatness": 0.3196,
+        "mean_hi_ratio": 0.5653
+      }
+    ],
+    "top_frames": [
+      {
+        "time_sec": 19.3,
+        "score": 2.174,
+        "rms": 0.0241,
+        "centroid_hz": 2469.2,
+        "flatness": 0.2519,
+        "hi_ratio": 0.6156
+      },
+      {
+        "time_sec": 4.34,
+        "score": 1.986,
+        "rms": 0.0114,
+        "centroid_hz": 1981.3,
+        "flatness": 0.5107,
+        "hi_ratio": 0.3896
+      },
+      {
+        "time_sec": 12.22,
+        "score": 1.986,
+        "rms": 0.0288,
+        "centroid_hz": 1995.6,
+        "flatness": 0.5089,
+        "hi_ratio": 0.3903
+      },
+      {
+        "time_sec": 12.16,
+        "score": 1.935,
+        "rms": 0.0273,
+        "centroid_hz": 1923.9,
+        "flatness": 0.578,
+        "hi_ratio": 0.3084
+      },
+      {
+        "time_sec": 7.42,
+        "score": 1.929,
+        "rms": 0.0175,
+        "centroid_hz": 2116.8,
+        "flatness": 0.4327,
+        "hi_ratio": 0.4038
+      },
+      {
+        "time_sec": 14.34,
+        "score": 1.926,
+        "rms": 0.0108,
+        "centroid_hz": 2008.4,
+        "flatness": 0.3196,
+        "hi_ratio": 0.5653
+      },
+      {
+        "time_sec": 5.92,
+        "score": 1.896,
+        "rms": 0.0288,
+        "centroid_hz": 2026.4,
+        "flatness": 0.5075,
+        "hi_ratio": 0.3288
+      },
+      {
+        "time_sec": 8.9,
+        "score": 1.871,
+        "rms": 0.0086,
+        "centroid_hz": 2032.8,
+        "flatness": 0.385,
+        "hi_ratio": 0.4562
+      },
+      {
+        "time_sec": 5.94,
+        "score": 1.862,
+        "rms": 0.0273,
+        "centroid_hz": 1919.6,
+        "flatness": 0.4797,
+        "hi_ratio": 0.3782
+      },
+      {
+        "time_sec": 13.6,
+        "score": 1.821,
+        "rms": 0.0146,
+        "centroid_hz": 2112.7,
+        "flatness": 0.4636,
+        "hi_ratio": 0.3126
+      }
+    ],
+    "top_halfsec_centers": [
+      {
+        "center_sec": 5.82,
+        "mean_score": 0.927,
+        "mean_rms": 0.1029,
+        "mean_centroid_hz": 1260.7
+      },
+      {
+        "center_sec": 5.8,
+        "mean_score": 0.927,
+        "mean_rms": 0.102,
+        "mean_centroid_hz": 1236.1
+      },
+      {
+        "center_sec": 5.78,
+        "mean_score": 0.927,
+        "mean_rms": 0.1035,
+        "mean_centroid_hz": 1214.3
+      },
+      {
+        "center_sec": 5.76,
+        "mean_score": 0.923,
+        "mean_rms": 0.1068,
+        "mean_centroid_hz": 1200.1
+      },
+      {
+        "center_sec": 5.74,
+        "mean_score": 0.921,
+        "mean_rms": 0.1129,
+        "mean_centroid_hz": 1195.7
+      },
+      {
+        "center_sec": 5.84,
+        "mean_score": 0.897,
+        "mean_rms": 0.108,
+        "mean_centroid_hz": 1269.8
+      },
+      {
+        "center_sec": 5.72,
+        "mean_score": 0.864,
+        "mean_rms": 0.1219,
+        "mean_centroid_hz": 1143.3
+      },
+      {
+        "center_sec": 12.12,
+        "mean_score": 0.854,
+        "mean_rms": 0.0428,
+        "mean_centroid_hz": 1074.9
+      },
+      {
+        "center_sec": 12.14,
+        "mean_score": 0.853,
+        "mean_rms": 0.0413,
+        "mean_centroid_hz": 1071.9
+      },
+      {
+        "center_sec": 12.16,
+        "mean_score": 0.851,
+        "mean_rms": 0.0413,
+        "mean_centroid_hz": 1071.8
+      }
+    ]
+  }
+]

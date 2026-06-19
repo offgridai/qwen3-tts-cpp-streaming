@@ -14,7 +14,7 @@ The model outputs:
 - `logits_all`: [1, 15, 2048]  per-codebook logits from the selected hidden state
 
 Usage:
-  python scripts/convert_code_predictor_to_coreml.py \
+  python tools/convert_code_predictor_to_coreml.py \
       --input models/Qwen3-TTS-12Hz-0.6B-Base \
       --output models/coreml/code_predictor.mlpackage
 """

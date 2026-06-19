@@ -1,5 +1,6 @@
 @echo off
-
+set "ROOT=%~dp0.."
+pushd "%ROOT%"
 build-ninja-cuda\apps\streaming_cli\qwen3_streaming_cli.exe ^
   -m models ^
   --voice-design ^
@@ -25,3 +26,4 @@ build-ninja-cuda\apps\streaming_cli\qwen3_streaming_cli.exe ^
   --voice-design-instruct "A 30 year old woman with a rich feminine voice." ^
   -t "I was not expecting visitors this late. What a pleasure it is to meet you here." ^
   -o examples\voice_design_quality_stable.wav
+popd

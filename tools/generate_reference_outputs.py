@@ -9,7 +9,7 @@ This script runs the full TTS pipeline and saves intermediate outputs at each st
 4. Decoded audio from vocoder
 
 Usage:
-    /root/.local/bin/uv run python scripts/generate_reference_outputs.py
+    /root/.local/bin/uv run python tools/generate_reference_outputs.py
 """
 
 import json

@@ -7,7 +7,7 @@ Generates speech with both pipelines using deterministic settings,
 then compares waveform correlation, duration, and error metrics.
 
 Usage:
-    /root/.local/bin/uv run python scripts/compare_e2e.py
+    /root/.local/bin/uv run python tools/compare_e2e.py
 """
 
 from __future__ import annotations

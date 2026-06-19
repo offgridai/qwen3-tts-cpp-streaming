@@ -1,5 +1,6 @@
 @echo off
-
+set "ROOT=%~dp0.."
+pushd "%ROOT%"
 build-ninja-cuda\apps\streaming_cli\qwen3_streaming_cli.exe ^
   -m models ^
   --model-name qwen3-tts-0.6b-f16 ^
@@ -24,3 +25,4 @@ build-ninja-cuda\apps\streaming_cli\qwen3_streaming_cli.exe ^
   --final-context-frames 3 ^
   -t "I was not expecting visitors this late. What a pleasure it is to meet you here. Did you know I offer sandwiches for sale? Tell me about your favorite childhood memory. Preferably of sandwiches. Thanks!" ^
   -o examples\lana_linecoach_proxy.wav
+popd

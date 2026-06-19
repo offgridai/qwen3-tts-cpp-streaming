@@ -319,11 +319,11 @@ if ($GenerateMissing -or $ForceRegenerate) {
     $env:QWEN3_TTS_REF_AUDIO = $resolvedReferenceAudio
 
     if ($ForceRegenerate -or -not (Test-AllExist $requiredDeterministicRefs)) {
-        Invoke-PythonScript -repoRoot $repoRoot -scriptRelativePath "scripts/generate_deterministic_reference.py" -runner $runner -suppressSoxWarnings:$suppressSoxWarnings
+        Invoke-PythonScript -repoRoot $repoRoot -scriptRelativePath "tools/generate_deterministic_reference.py" -runner $runner -suppressSoxWarnings:$suppressSoxWarnings
     }
 
     if ($ForceRegenerate -or -not (Test-AllExist $legacyRefs)) {
-        Invoke-PythonScript -repoRoot $repoRoot -scriptRelativePath "scripts/generate_reference_outputs.py" -runner $runner -suppressSoxWarnings:$suppressSoxWarnings
+        Invoke-PythonScript -repoRoot $repoRoot -scriptRelativePath "tools/generate_reference_outputs.py" -runner $runner -suppressSoxWarnings:$suppressSoxWarnings
     }
 }
 

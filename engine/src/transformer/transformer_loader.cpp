@@ -120,7 +120,7 @@ bool TTSTransformer::load_model(const std::string & model_path) {
             impl_->model.code_pred_small_to_mtp_weight == nullptr) {
             error_msg_ =
                 "Model is missing code_pred.small_to_mtp projection weights. "
-                "Re-convert with the updated scripts/convert_tts_to_gguf.py.";
+                "Re-convert with the updated tools/convert_tts_to_gguf.py.";
             free_transformer_model(impl_->model);
             gguf_free(ctx);
             if (meta_ctx) ggml_free(meta_ctx);

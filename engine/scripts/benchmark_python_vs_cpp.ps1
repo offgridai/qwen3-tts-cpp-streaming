@@ -433,7 +433,7 @@ foreach ($model in $models) {
 
         $pyOut = Join-Path $outRoot ("{0}_{1}_{2}_run{3}.wav" -f $pythonPipelineSlug, $Scenario, $model.Name, $rep)
         $pyArgs = @(
-            "scripts/benchmark_pytorch_vs_cpp.py",
+            "tools/benchmark_pytorch_vs_cpp.py",
             "--worker",
             "--backend", $PythonBackend,
             "--mode", $Scenario,
