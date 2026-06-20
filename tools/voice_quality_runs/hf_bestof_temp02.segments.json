@@ -1,0 +1,131 @@
+{
+  "output_wav": "C:\\git\\qwen3-tts-cpp-streaming\\tools\\voice_quality_runs\\hf_bestof_temp02.wav",
+  "fidelity_preset": "high",
+  "render_path": "batch",
+  "segmentation": "per-sentence",
+  "segment_count": 2,
+  "settings": {
+    "temperature": 0.2,
+    "top_k": 8,
+    "top_p": 1.0,
+    "repetition_penalty": 1.02,
+    "max_tokens": 320,
+    "takes_per_segment": 4,
+    "segment_gap_ms": 90.0,
+    "fade_ms": 12.0
+  },
+  "segment_selection": [
+    {
+      "segment_index": 1,
+      "text": "I was not expecting visitors this late.",
+      "selected_file": "C:\\git\\qwen3-tts-cpp-streaming\\tools\\voice_quality_runs\\hf_bestof_temp02_segments\\001.wav",
+      "selected_score": {
+        "worst_halfsec": 0.527,
+        "worst_region": 1.198,
+        "mean_top3_halfsec": 0.5246666666666667
+      },
+      "candidates": [
+        {
+          "take": 1,
+          "file": "C:\\git\\qwen3-tts-cpp-streaming\\tools\\voice_quality_runs\\hf_bestof_temp02_segments\\001_take01.wav",
+          "selection_score": {
+            "worst_halfsec": 0.543,
+            "worst_region": 1.212,
+            "mean_top3_halfsec": 0.542
+          }
+        },
+        {
+          "take": 2,
+          "file": "C:\\git\\qwen3-tts-cpp-streaming\\tools\\voice_quality_runs\\hf_bestof_temp02_segments\\001_take02.wav",
+          "selection_score": {
+            "worst_halfsec": 0.602,
+            "worst_region": 1.65,
+            "mean_top3_halfsec": 0.6013333333333333
+          }
+        },
+        {
+          "take": 3,
+          "file": "C:\\git\\qwen3-tts-cpp-streaming\\tools\\voice_quality_runs\\hf_bestof_temp02_segments\\001_take03.wav",
+          "selection_score": {
+            "worst_halfsec": 0.527,
+            "worst_region": 1.198,
+            "mean_top3_halfsec": 0.5246666666666667
+          }
+        },
+        {
+          "take": 4,
+          "file": "C:\\git\\qwen3-tts-cpp-streaming\\tools\\voice_quality_runs\\hf_bestof_temp02_segments\\001_take04.wav",
+          "selection_score": {
+            "worst_halfsec": 0.546,
+            "worst_region": 1.29,
+            "mean_top3_halfsec": 0.5443333333333333
+          }
+        }
+      ]
+    },
+    {
+      "segment_index": 2,
+      "text": "What a pleasure it is to meet you here.",
+      "selected_file": "C:\\git\\qwen3-tts-cpp-streaming\\tools\\voice_quality_runs\\hf_bestof_temp02_segments\\002.wav",
+      "selected_score": {
+        "worst_halfsec": 0.492,
+        "worst_region": 0.939,
+        "mean_top3_halfsec": 0.4916666666666667
+      },
+      "candidates": [
+        {
+          "take": 1,
+          "file": "C:\\git\\qwen3-tts-cpp-streaming\\tools\\voice_quality_runs\\hf_bestof_temp02_segments\\002_take01.wav",
+          "selection_score": {
+            "worst_halfsec": 0.608,
+            "worst_region": 1.068,
+            "mean_top3_halfsec": 0.605
+          }
+        },
+        {
+          "take": 2,
+          "file": "C:\\git\\qwen3-tts-cpp-streaming\\tools\\voice_quality_runs\\hf_bestof_temp02_segments\\002_take02.wav",
+          "selection_score": {
+            "worst_halfsec": 0.591,
+            "worst_region": 1.41,
+            "mean_top3_halfsec": 0.5666666666666668
+          }
+        },
+        {
+          "take": 3,
+          "file": "C:\\git\\qwen3-tts-cpp-streaming\\tools\\voice_quality_runs\\hf_bestof_temp02_segments\\002_take03.wav",
+          "selection_score": {
+            "worst_halfsec": 0.747,
+            "worst_region": 1.495,
+            "mean_top3_halfsec": 0.7463333333333333
+          }
+        },
+        {
+          "take": 4,
+          "file": "C:\\git\\qwen3-tts-cpp-streaming\\tools\\voice_quality_runs\\hf_bestof_temp02_segments\\002_take04.wav",
+          "selection_score": {
+            "worst_halfsec": 0.492,
+            "worst_region": 0.939,
+            "mean_top3_halfsec": 0.4916666666666667
+          }
+        }
+      ]
+    }
+  ],
+  "segments": [
+    {
+      "text": "I was not expecting visitors this late.",
+      "file": "C:\\git\\qwen3-tts-cpp-streaming\\tools\\voice_quality_runs\\hf_bestof_temp02_segments\\001.wav",
+      "start_sec": 0.0,
+      "end_sec": 2.857,
+      "duration_sec": 2.857
+    },
+    {
+      "text": "What a pleasure it is to meet you here.",
+      "file": "C:\\git\\qwen3-tts-cpp-streaming\\tools\\voice_quality_runs\\hf_bestof_temp02_segments\\002.wav",
+      "start_sec": 2.947,
+      "end_sec": 5.244,
+      "duration_sec": 2.297
+    }
+  ]
+}

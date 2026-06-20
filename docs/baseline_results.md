@@ -40,8 +40,8 @@ For callback-driven consumers that maintain their own playback queue, use `--tts
 - `final_context_frames=3`
 - `adaptive_steady_windows=off`
 - `paced_audio_delivery=on`
-- `delivery_chunk_ms=80`
-- `delivery_start_buffer_ms=80`
+- `delivery_chunk_ms=240`
+- `delivery_start_buffer_ms=240`
 - `delivery_target_lead_ms=300`
 - `steady_split_decode_frames=0`
 

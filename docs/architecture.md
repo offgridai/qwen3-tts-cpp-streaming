@@ -145,8 +145,8 @@ For callback-driven consumers such as Offgrid/LineCoach, the CLI now exposes an 
 - `early_context_window_count=2`
 - `final_context_frames=3`
 - `adaptive_steady_windows=off`
-- `delivery_chunk_ms=80`
-- `delivery_start_buffer_ms=80`
+- `delivery_chunk_ms=240`
+- `delivery_start_buffer_ms=240`
 - `delivery_target_lead_ms=300`
 - `steady_split_decode_frames=0`
 

@@ -794,8 +794,8 @@ int main(int argc, char** argv) {
                 options.adaptive_low_watermark_ms = 220;
                 options.adaptive_high_watermark_ms = 520;
                 options.paced_audio_delivery = true;
-                options.delivery_chunk_ms = 80;
-                options.delivery_start_buffer_ms = 80;
+                options.delivery_chunk_ms = 240;
+                options.delivery_start_buffer_ms = 240;
                 options.delivery_target_lead_ms = 350;
                 options.steady_split_decode_frames = 0;
             } else {

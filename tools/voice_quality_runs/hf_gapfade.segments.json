@@ -1,0 +1,32 @@
+{
+  "output_wav": "C:\\git\\qwen3-tts-cpp-streaming\\tools\\voice_quality_runs\\hf_gapfade.wav",
+  "fidelity_preset": "high",
+  "render_path": "batch",
+  "segmentation": "per-sentence",
+  "segment_count": 2,
+  "settings": {
+    "temperature": 0.0,
+    "top_k": 0,
+    "top_p": 1.0,
+    "repetition_penalty": 1.02,
+    "max_tokens": 320,
+    "segment_gap_ms": 90.0,
+    "fade_ms": 12.0
+  },
+  "segments": [
+    {
+      "text": "I was not expecting visitors this late.",
+      "file": "C:\\git\\qwen3-tts-cpp-streaming\\tools\\voice_quality_runs\\hf_gapfade_segments\\001.wav",
+      "start_sec": 0.0,
+      "end_sec": 2.617,
+      "duration_sec": 2.617
+    },
+    {
+      "text": "What a pleasure it is to meet you here.",
+      "file": "C:\\git\\qwen3-tts-cpp-streaming\\tools\\voice_quality_runs\\hf_gapfade_segments\\002.wav",
+      "start_sec": 2.707,
+      "end_sec": 5.004,
+      "duration_sec": 2.297
+    }
+  ]
+}

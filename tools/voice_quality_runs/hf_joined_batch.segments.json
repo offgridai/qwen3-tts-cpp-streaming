@@ -1,0 +1,23 @@
+{
+  "output_wav": "C:\\git\\qwen3-tts-cpp-streaming\\tools\\voice_quality_runs\\hf_joined_batch.wav",
+  "fidelity_preset": "high",
+  "render_path": "batch",
+  "segmentation": "joined",
+  "segment_count": 1,
+  "settings": {
+    "temperature": 0.0,
+    "top_k": 0,
+    "top_p": 1.0,
+    "repetition_penalty": 1.02,
+    "max_tokens": 320,
+    "segment_gap_ms": 90.0,
+    "fade_ms": 12.0
+  },
+  "segments": [
+    {
+      "text": "I was not expecting visitors this late. What a pleasure it is to meet you here.",
+      "start_sec": 0.0,
+      "end_sec": null
+    }
+  ]
+}
