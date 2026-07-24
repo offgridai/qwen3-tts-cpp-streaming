@@ -11,6 +11,8 @@ models/                 Local GGUF models (ignored by Git)
 reference/              Reusable speaker embeddings and reference audio
 tools/                  Model conversion and operational quality utilities
 docs/architecture.md    Runtime architecture and streaming semantics
+docs/performance-baseline-0.6b.md
+                        Dated 0.6B benchmark and optimization targets
 ```
 
 `engine/ggml/` is built as part of the workspace. The streaming CLI links directly to `tts_engine`; it does not launch the engine CLI as a subprocess.
@@ -146,6 +148,8 @@ The C++ API and wrapper can emit a header followed by per-audio-chunk hints. Hin
 The hint track is not word, phoneme, viseme, or forced alignment. Sample end positions are exclusive. Downstream timing systems should treat activity and text progress as soft evidence.
 
 See [docs/architecture.md](docs/architecture.md) for the execution flow and concurrency model.
+
+See [docs/performance-baseline-0.6b.md](docs/performance-baseline-0.6b.md) for the initial 0.6B CUDA performance baseline, fidelity limitations, and optimization roadmap.
 
 ## Retained tools
 
