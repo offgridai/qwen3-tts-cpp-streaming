@@ -26,6 +26,31 @@ int32_t argmax_code_pred(const float * data, int32_t n) {
     return max_idx;
 }
 
+void apply_top_p(float * probabilities, int32_t count, float top_p) {
+    if (!(top_p > 0.0f && top_p < 1.0f)) {
+        return;
+    }
+    std::vector<int32_t> indices((size_t) count);
+    for (int32_t i = 0; i < count; ++i) {
+        indices[(size_t) i] = i;
+    }
+    std::sort(indices.begin(), indices.end(), [&](int32_t a, int32_t b) {
+        return probabilities[a] > probabilities[b];
+    });
+    double cumulative = 0.0;
+    bool keep = true;
+    for (int32_t index : indices) {
+        if (!keep) {
+            probabilities[index] = 0.0f;
+            continue;
+        }
+        cumulative += probabilities[index];
+        if (cumulative >= top_p) {
+            keep = false;
+        }
+    }
+}
+
 } // namespace
 
 bool TTSTransformer::get_hidden_states(std::vector<float> & hidden) const {
@@ -36,64 +61,13 @@ bool TTSTransformer::get_hidden_states(std::vector<float> & hidden) const {
     return true;
 }
 
-bool TTSTransformer::predict_codes(const float * hidden, const int32_t * prev_codes,
-                                   std::vector<float> & output) {
-    if (!impl_->model.ctx) {
-        error_msg_ = "Model not loaded";
-        return false;
-    }
-
-    const auto & cfg = impl_->model.config;
-    int n_prev = (prev_codes != nullptr) ? cfg.n_codebooks - 1 : 0;
-
-    struct ggml_cgraph * gf = transformer_internal::ops::build_code_pred_graph(*this, n_prev);
-
-    if (!ggml_backend_sched_alloc_graph(impl_->state.sched, gf)) {
-        error_msg_ = "Failed to allocate code predictor graph";
-        return false;
-    }
-
-    struct ggml_tensor * inp_hidden = ggml_graph_get_tensor(gf, "inp_hidden");
-    if (inp_hidden) {
-        ggml_backend_tensor_set(inp_hidden, hidden, 0, cfg.hidden_size * sizeof(float));
-    }
-
-    if (n_prev > 0) {
-        struct ggml_tensor * inp_prev = ggml_graph_get_tensor(gf, "inp_prev_codes");
-        if (inp_prev) {
-            ggml_backend_tensor_set(inp_prev, prev_codes, 0, n_prev * sizeof(int32_t));
-        }
-    }
-
-    if (ggml_backend_sched_graph_compute(impl_->state.sched, gf) != GGML_STATUS_SUCCESS) {
-        error_msg_ = "Failed to compute code predictor graph";
-        ggml_backend_sched_reset(impl_->state.sched);
-        return false;
-    }
-
-    output.resize((cfg.n_codebooks - 1) * cfg.code_pred_vocab_size);
-
-    for (int cb = 0; cb < cfg.n_codebooks - 1; ++cb) {
-        char name[32];
-        snprintf(name, sizeof(name), "logits_cb%d", cb + 1);
-        struct ggml_tensor * cb_logits = ggml_graph_get_tensor(gf, name);
-        if (cb_logits) {
-            ggml_backend_tensor_get(cb_logits, output.data() + cb * cfg.code_pred_vocab_size,
-                                    0, cfg.code_pred_vocab_size * sizeof(float));
-        }
-    }
-
-    ggml_backend_sched_reset(impl_->state.sched);
-
-    return true;
-}
-
 bool transformer_internal::ops::predict_codes_autoregressive_coreml(TTSTransformer & self,
                                                                     const float * hidden,
                                                                     int32_t codebook_0_token,
                                                                     std::vector<int32_t> & output,
                                                                     float temperature,
                                                                     int32_t top_k,
+                                                                    float top_p,
                                                                     int32_t trace_frame) {
     auto & impl = self.impl_;
     auto & error_msg = self.error_msg_;
@@ -153,6 +127,7 @@ bool transformer_internal::ops::predict_codes_autoregressive_coreml(TTSTransform
             code_probs[i] = (float) (code_probs[i] / sum);
         }
 
+        apply_top_p(code_probs.data(), vocab_size, top_p);
         std::discrete_distribution<int32_t> dist(code_probs.begin(), code_probs.begin() + vocab_size);
         return dist(impl->rng);
     };
@@ -237,7 +212,7 @@ bool transformer_internal::ops::predict_codes_autoregressive_coreml(TTSTransform
 
 bool TTSTransformer::predict_codes_autoregressive(const float * hidden, int32_t codebook_0_token,
                                                   std::vector<int32_t> & output,
-                                                  float temperature, int32_t top_k,
+                                                  float temperature, int32_t top_k, float top_p,
                                                   int32_t trace_frame) {
     if (!impl_->model.ctx) {
         error_msg_ = "Model not loaded";
@@ -254,7 +229,7 @@ bool TTSTransformer::predict_codes_autoregressive(const float * hidden, int32_t 
 #endif
 
     if (impl_->use_coreml_code_predictor && impl_->coreml_code_predictor.is_loaded()) {
-        if (transformer_internal::ops::predict_codes_autoregressive_coreml(*this, hidden, codebook_0_token, output, temperature, top_k, trace_frame)) {
+        if (transformer_internal::ops::predict_codes_autoregressive_coreml(*this, hidden, codebook_0_token, output, temperature, top_k, top_p, trace_frame)) {
             return true;
         }
         if (impl_->skip_ggml_code_pred_layers) {
@@ -307,6 +282,7 @@ bool TTSTransformer::predict_codes_autoregressive(const float * hidden, int32_t 
         for (int32_t i = 0; i < vocab_size; ++i) {
             code_probs[i] = (float) (code_probs[i] / sum);
         }
+        apply_top_p(code_probs.data(), vocab_size, top_p);
         std::discrete_distribution<int32_t> dist(code_probs.begin(), code_probs.begin() + vocab_size);
         return dist(impl_->rng);
     };

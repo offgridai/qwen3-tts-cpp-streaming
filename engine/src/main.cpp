@@ -62,26 +62,25 @@ void print_usage(const char * program) {
     fprintf(stderr, "  --top-p <val>          Top-p sampling (default: 1.0)\n");
     fprintf(stderr, "  --max-tokens <n>       Maximum audio tokens (default: 4096)\n");
     fprintf(stderr, "  --repetition-penalty <val> Repetition penalty (default: 1.05)\n");
-    fprintf(stderr, "  -l, --language <lang>  Language: en,ru,zh,ja,ko,de,fr,es (default: en)\n");
+    fprintf(stderr, "  -l, --language <lang>  Language: en,ru,zh,ja,ko,de,fr,es,it,pt (default: en)\n");
     fprintf(stderr, "  --instruction <instr>  Style/voice instruction\n");
     fprintf(stderr, "  --instruct <text>      Voice steering instructions (e.g. \"whispering\")\n");
-    fprintf(stderr, "  -j, --threads <n>      Number of threads (default: 4)\n");
     fprintf(stderr, "  --batch                Disable streaming defaults and write full batch WAV only\n");
     fprintf(stderr, "  --streaming-generate  Enable interleaved generation + tail-context decode (default on)\n");
     fprintf(stderr, "  --first-tail-window-frames <n> First streaming decode size (default: 3)\n");
     fprintf(stderr, "  --steady-tail-window-frames <n> Steady streaming decode step (default: 8)\n");
-    fprintf(stderr, "  --context-frames <n> Tail-context frames for streaming decode (default: 3)\n");
-    fprintf(stderr, "  --final-context-frames <n> Larger context for final streaming flush (default: 4)\n");
-    fprintf(stderr, "  --adaptive-steady-windows Enable queue-aware steady window sizing (default on)\n");
+    fprintf(stderr, "  --context-frames <n> Tail-context frames for streaming decode (default: 2)\n");
+    fprintf(stderr, "  --final-context-frames <n> Larger context for final streaming flush (default: 3)\n");
+    fprintf(stderr, "  --adaptive-steady-windows Enable queue-aware steady window sizing (default off)\n");
     fprintf(stderr, "  --no-adaptive-steady-windows Disable queue-aware steady window sizing\n");
     fprintf(stderr, "  --adaptive-min-tail-window-frames <n> Smallest steady window when queue runs low (default: 6)\n");
     fprintf(stderr, "  --adaptive-low-watermark-ms <ms> Queue depth that triggers smaller windows (default: 220)\n");
     fprintf(stderr, "  --adaptive-high-watermark-ms <ms> Queue depth that restores full windows (default: 520)\n");
-    fprintf(stderr, "  --paced-audio-delivery Emit smaller paced PCM chunks from an internal buffer (default on)\n");
+    fprintf(stderr, "  --paced-audio-delivery Emit smaller paced PCM chunks from an internal buffer (default off)\n");
     fprintf(stderr, "  --no-paced-audio-delivery Disable paced PCM emission\n");
-    fprintf(stderr, "  --delivery-chunk-ms <ms> Paced PCM chunk size (default: 80)\n");
-    fprintf(stderr, "  --delivery-start-buffer-ms <ms> Paced buffer before first emit (default: 80)\n");
-    fprintf(stderr, "  --delivery-target-lead-ms <ms> Extra paced lead to tolerate bursty decode (default: 240)\n");
+    fprintf(stderr, "  --delivery-chunk-ms <ms> Paced PCM chunk size (default: 40)\n");
+    fprintf(stderr, "  --delivery-start-buffer-ms <ms> Paced buffer before first emit (default: 40)\n");
+    fprintf(stderr, "  --delivery-target-lead-ms <ms> Extra paced lead to tolerate bursty decode (default: 300)\n");
     fprintf(stderr, "  --paced-live-playback Route live playback through the paced emitter too (default off)\n");
     fprintf(stderr, "  --no-paced-live-playback Leave live playback on raw window writes even when paced delivery is on\n");
     fprintf(stderr, "  --steady-split-decode-frames <n> Split later non-final windows into smaller decode jobs after queueing\n");
@@ -91,9 +90,6 @@ void print_usage(const char * program) {
     fprintf(stderr, "  --play-streaming       Play streaming chunks live while also writing WAV (default on)\n");
     fprintf(stderr, "  --no-play-streaming    Disable live playback while keeping streaming WAV output\n");
     fprintf(stderr, "  --live-preroll-ms <ms> Buffer live PCM before first playback submit (default: 150)\n");
-    fprintf(stderr, "  --prewarm-streaming    Warm transformer/decoder before timed streaming synthesis (default on)\n");
-    fprintf(stderr, "  --no-prewarm-streaming Disable streaming warmup\n");
-    fprintf(stderr, "  --prewarm-frames <n>   Number of frames for transformer prewarm (default: 1)\n");
     fprintf(stderr, "  --dump-first-frame-profile Print first-frame latency breakdown\n");
     fprintf(stderr, "  --dump-streaming-overlap Print per-window queue/decode overlap diagnostics\n");
     fprintf(stderr, "  -h, --help             Show this help\n");
@@ -247,7 +243,6 @@ int main(int argc, char ** argv) {
             params.streaming_generate = false;
             params.async_streaming_decode = false;
             params.play_streaming = false;
-            params.prewarm_streaming = false;
         } else if (arg == "--safe-final-tail") {
             params.final_context_frames = 16;
         } else if (arg == "--streaming-generate") {
@@ -368,26 +363,10 @@ int main(int argc, char ** argv) {
                 return 1;
             }
             params.live_preroll_ms = std::max(0, std::stoi(args[i]));
-        } else if (arg == "--prewarm-streaming") {
-            params.prewarm_streaming = true;
-        } else if (arg == "--no-prewarm-streaming") {
-            params.prewarm_streaming = false;
         } else if (arg == "--dump-first-frame-profile") {
             params.dump_first_frame_profile = true;
         } else if (arg == "--dump-streaming-overlap") {
             params.dump_streaming_overlap = true;
-        } else if (arg == "--prewarm-frames") {
-            if (i + 1 >= args.size()) {
-                fprintf(stderr, "Error: missing prewarm frame count\n");
-                return 1;
-            }
-            params.prewarm_frames = std::max(1, std::stoi(args[++i]));
-        } else if (arg == "-j" || arg == "--threads") {
-            if (++i >= (int) args.size()) {
-                fprintf(stderr, "Error: missing threads value\n");
-                return 1;
-            }
-            params.n_threads = std::stoi(args[i]);
         } else {
             fprintf(stderr, "Error: unknown argument: %s\n", arg.c_str());
             print_usage(args[0].c_str());

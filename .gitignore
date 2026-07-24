@@ -20,3 +20,11 @@
 *.suo
 .venv/
 /.tmp_*/
+__pycache__/
+*.py[cod]
+/tools/*_runs/
+/tools/*_report.json
+/tools/*.wav
+/reference/*_segments/
+/test_output_*/
+/test_voice_design/

@@ -834,9 +834,6 @@ int main(int argc, char** argv) {
         else if (a == "--cache-instruction-tokens") options.cache_instruction_tokens = true;
         else if (a == "--no-cache-instruction-tokens") options.cache_instruction_tokens = false;
         else if (a == "--instruction-cache-key") options.instruction_cache_key = next();
-        else if (a == "--warm-voice-profile") options.warm_voice_profile = true;
-        else if (a == "--warm-voice-profile-key") options.warm_voice_profile_key = next();
-        else if (a == "--warmup-text") options.warmup_text = next();
         else if (a == "--repeat") repeat = std::max(1, std::stoi(next()));
         else if (a == "--simulate-stream-callback") simulate_stream_callback = true;
         else if (a == "-h" || a == "--help") {
@@ -875,9 +872,6 @@ int main(int argc, char** argv) {
                       << "  --async-streaming-decode | --no-async-streaming-decode\n"
                       << "  --cache-instruction-tokens | --no-cache-instruction-tokens\n"
                       << "  --instruction-cache-key <key>\n"
-                      << "  --warm-voice-profile\n"
-                      << "  --warm-voice-profile-key <key>\n"
-                      << "  --warmup-text <text>\n"
                       << "  --repeat <n>\n"
                       << "  --simulate-stream-callback\n"
                       << "  --dump-streaming-overlap\n"

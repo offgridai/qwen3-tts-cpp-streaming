@@ -228,8 +228,8 @@ int main(int argc, char ** argv) {
             
             // Check block size alignment
             if (ne[0] % ggml_blck_size(new_type) != 0) {
-                printf("[%4d/%4d] %-48s - F16 (skipped, %lld not divisible by %d)\n", 
-                    i, n_tensors, name, (long long)ne[0], ggml_blck_size(new_type));
+                printf("[%4d/%4d] %-48s - F16 (skipped, %lld not divisible by %lld)\n",
+                    i, n_tensors, name, (long long) ne[0], (long long) ggml_blck_size(new_type));
                 new_type = type; // Fallback
             }
         }

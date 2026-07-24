@@ -164,6 +164,7 @@ bool Qwen3TTS::load_models(const std::string & model_dir, const std::string & mo
                                                 1.05f,
                                                 0.9f,
                                                 75,
+                                                1.0f,
                                                 instruct_tokens.empty() ? nullptr : instruct_tokens.data(),
                                                 (int32_t) instruct_tokens.size(),
                                                 nullptr)) {

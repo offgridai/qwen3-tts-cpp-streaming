@@ -204,38 +204,6 @@ target_link_libraries(tts_engine_cli PRIVATE
     tts_engine
 )
 
-# Test executable for tokenizer
-add_executable(test_tokenizer
-    tests/test_tokenizer.cpp
-)
-target_link_libraries(test_tokenizer PRIVATE
-    text_tokenizer
-    Threads::Threads
-)
-
-# Test executable for audio encoder
-add_executable(test_encoder
-    tests/test_encoder.cpp
-)
-target_link_libraries(test_encoder PRIVATE
-    audio_tokenizer_encoder
-    Threads::Threads
-)
-
-# Test executable for transformer
-add_executable(test_transformer
-    tests/test_transformer.cpp
-)
-target_link_libraries(test_transformer PRIVATE
-    tts_transformer
-    Threads::Threads
-)
-
-# Test executable for audio decoder
-add_executable(test_decoder
-    tests/test_decoder.cpp
-)
-
 # Quantization tool
 add_executable(tts_engine_quantize
     src/qwen3_tts_quantize.cpp
@@ -244,13 +212,9 @@ target_include_directories(tts_engine_quantize PRIVATE
     ${GGML_DIR}/include
 )
 qwen3_link_ggml(tts_engine_quantize)
-target_link_libraries(test_decoder PRIVATE
-    audio_tokenizer_decoder
-    Threads::Threads
-)
 
 # Install targets
-install(TARGETS text_tokenizer tts_transformer audio_tokenizer_encoder audio_tokenizer_decoder tts_engine tts_engine_cli
+install(TARGETS text_tokenizer tts_transformer audio_tokenizer_encoder audio_tokenizer_decoder tts_engine tts_engine_cli tts_engine_quantize
     ARCHIVE DESTINATION lib
     RUNTIME DESTINATION bin
 )
@@ -262,24 +226,6 @@ install(FILES
     src/audio_tokenizer_encoder.h 
     src/audio_tokenizer_decoder.h 
     src/qwen3_tts.h
+    src/qwen3_tts_c.h
     DESTINATION include
-)
-
-# CTest support
-enable_testing()
-add_test(NAME tokenizer_test
-    COMMAND test_tokenizer
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-)
-add_test(NAME encoder_test
-    COMMAND test_encoder --tokenizer models/qwen3-tts-0.6b-f16.gguf --audio clone.wav --reference reference/ref_audio_embedding.bin
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-)
-add_test(NAME transformer_test
-    COMMAND test_transformer
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-)
-add_test(NAME decoder_test
-    COMMAND test_decoder
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )

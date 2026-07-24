@@ -24,7 +24,6 @@ typedef struct {
     float temperature;
     float top_p;
     int32_t top_k;
-    int32_t n_threads;
     int32_t print_progress; // Use int32 instead of bool for ABI stability
     int32_t print_timing;   // Use int32
     float repetition_penalty;

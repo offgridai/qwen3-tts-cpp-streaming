@@ -90,9 +90,6 @@ struct tts_params {
     // Top-k sampling (0 = disabled)
     int32_t top_k = 75;
     
-    // Number of threads
-    int32_t n_threads = 4;
-    
     // Print progress during generation
     bool print_progress = false;
     
@@ -102,22 +99,21 @@ struct tts_params {
     // Repetition penalty for CB0 token generation (HuggingFace style)
     float repetition_penalty = 1.05f;
 
-    // Language ID for codec (2050=en, 2069=ru, 2055=zh, 2058=ja, 2064=ko, 2053=de, 2061=fr, 2054=es)
+    // Language ID for codec (2050=en, 2069=ru, 2055=zh, 2058=ja, 2064=ko,
+    // 2053=de, 2061=fr, 2054=es, 2070=it, 2071=pt)
     int32_t language_id = 2050;
 
     // Optional style/voice instruction
     std::string instruction;
     bool cache_instruction_tokens = false;
     std::string instruction_cache_key;
-    std::string voice_profile_key;
 
     // Optional named speaker (for CustomVoice models)
     std::string speaker;
 
 
-    // Experimental: interleave generation with tail-context vocoder decode.
-    // Produces a WAV-compatible output buffer, but decode is still single-threaded
-    // and blocks generation inside the frame callback.
+    // Interleave generation with tail-context vocoder decode. The full WAV-compatible
+    // result remains available while optional callbacks receive incremental PCM.
     bool streaming_generate = true;
     int32_t first_tail_window_frames = 3;
     // After the first window, optionally use a few smaller ramp windows before
@@ -136,29 +132,13 @@ struct tts_params {
     // context to avoid sounding clipped/truncated. <=0 means use context_frames.
     int32_t final_context_frames = 3;
 
-    // Experimental: when streaming_generate is enabled, queue vocoder decode
-    // work to a background worker so autoregressive code generation can keep
-    // running while prior windows decode.
+    // Queue vocoder work to a background worker so autoregressive generation can
+    // continue while prior windows decode.
     bool async_streaming_decode = true;
 
     // Experimental Windows-only live monitor for streaming chunks. The final
     // WAV is still written normally. On unsupported platforms this is ignored.
     bool play_streaming = true;
-
-    // Deprecated: historical throwaway synth/decode warmup path. This repo now
-    // prefers direct first-request execution plus cheap instruction-token cache
-    // priming over hidden work before real audio starts.
-    bool prewarm_streaming = false;
-    int32_t prewarm_frames = 1;
-    // Repeat the prewarm pass. Useful for testing whether first-request latency
-    // is dominated by first-run graph/kernel/JIT overhead versus steady hot-path cost.
-    int32_t prewarm_repeats = 1;
-    // Warm the exact first decode graph/window, the steady tail-context graph,
-    // and optionally the final-context graph. These are independent so latency
-    // experiments can isolate which warmup actually matters.
-    bool prewarm_first_decode = true;
-    bool prewarm_steady_decode = true;
-    bool prewarm_final_decode = false;
 
     // Diagnostic: print a compact first-frame latency breakdown for streaming generation.
     bool dump_first_frame_profile = false;
@@ -284,15 +264,6 @@ public:
     // Set progress callback
     void set_progress_callback(tts_progress_callback_t callback);
 
-    // Pre-tokenize and retain an instruction prefix for later reuse.
-    bool prime_instruction_cache(const std::string & instruction,
-                                 const std::string & cache_key = "");
-
-    // Prime cheap reusable state for a fixed voice/instruction profile. This no
-    // longer runs a hidden synthesis; it only retains tokenized instructions.
-    bool warm_voice_profile(const std::string & warmup_text,
-                            const tts_params & params = tts_params());
-    
     // Get error message
     const std::string & get_error() const { return error_msg_; }
     

@@ -109,39 +109,16 @@ public:
     // Clear code predictor KV cache
     void clear_code_pred_kv_cache();
     
-    // Forward pass for text tokens (prefill phase)
-    // text_tokens: input text token IDs [n_tokens]
-    // speaker_embd: speaker embedding [hidden_size] (optional, can be nullptr)
-    // n_past: number of tokens already in KV cache
-    // output: hidden states [n_tokens, hidden_size]
-    bool forward_text(const int32_t * text_tokens, int32_t n_tokens,
-                      const float * speaker_embd, int32_t n_past,
-                      std::vector<float> & output);
-
     bool forward_prefill(const float * prefill_embd, int32_t n_tokens,
                          int32_t n_past, std::vector<float> & output,
                          std::vector<float> * logits_out = nullptr);
     
-    // Forward pass for codec tokens (generation phase)
-    // codec_token: single codec token for first codebook
-    // n_past: number of tokens already in KV cache
-    // output: logits for next codec token [codec_vocab_size]
-    bool forward_codec(int32_t codec_token, int32_t n_past,
-                       std::vector<float> & output);
-
     bool forward_step(const float * step_embd, int32_t n_past,
                       std::vector<float> & output,
                       std::vector<float> * hidden_out = nullptr);
     
     // Get hidden states from last forward pass (for code predictor)
     bool get_hidden_states(std::vector<float> & hidden) const;
-    
-    // Run code predictor to get all 16 codebook predictions
-    // hidden: hidden states from talker [hidden_size]
-    // prev_codes: previous codes for codebooks 1-15 (can be nullptr for first step)
-    // output: logits for all 16 codebooks [16, code_pred_vocab_size]
-    bool predict_codes(const float * hidden, const int32_t * prev_codes,
-                       std::vector<float> & output);
     
     // Run code predictor autoregressively to generate 15 codes (codebooks 1-15)
     // hidden: hidden states from talker [hidden_size]
@@ -151,6 +128,7 @@ public:
                                        std::vector<int32_t> & output,
                                        float temperature = 0.9f,
                                        int32_t top_k = 50,
+                                       float top_p = 1.0f,
                                        int32_t trace_frame = -1);
     
     // Generate speech codes autoregressively
@@ -165,6 +143,7 @@ public:
                   float repetition_penalty = 1.05f,
                   float temperature = 0.9f,
                   int32_t top_k = 75,
+                  float top_p = 1.0f,
                   const int32_t * instruct_tokens = nullptr,
                   int32_t n_instruct_tokens = 0);
 
@@ -180,6 +159,7 @@ public:
                             float repetition_penalty = 1.05f,
                             float temperature = 0.9f,
                             int32_t top_k = 75,
+                            float top_p = 1.0f,
                             const int32_t * instruct_tokens = nullptr,
                             int32_t n_instruct_tokens = 0,
                             tts_generation_first_frame_profile * first_frame_profile = nullptr);
@@ -191,15 +171,6 @@ public:
     // Resolve a named speaker (CustomVoice models) into a codec embedding vector.
     bool get_named_speaker_embedding(const std::string & speaker_name,
                                      std::vector<float> & speaker_embedding);
-    
-    // Legacy interface for compatibility
-    bool forward(const int32_t * tokens, int32_t n_tokens, int32_t n_past,
-                 std::vector<float> & output);
-    
-    bool forward_with_audio(const int32_t * tokens, int32_t n_tokens,
-                            const float * audio_embd, int32_t n_audio,
-                            int32_t audio_start_pos, int32_t n_past,
-                            std::vector<float> & output);
     
 private:
     friend struct transformer_internal::ops;

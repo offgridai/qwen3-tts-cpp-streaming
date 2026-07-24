@@ -118,6 +118,10 @@ Qwen3StreamingTts::~Qwen3StreamingTts() {
 }
 
 bool Qwen3StreamingTts::load(const std::string& model_dir) {
+    if (!fs::is_directory(model_dir)) {
+        std::cerr << "Model directory does not exist: " << model_dir << "\n";
+        return false;
+    }
     impl_->model_dir = model_dir;
     return true;
 }
@@ -136,70 +140,6 @@ bool Qwen3StreamingTts::load_speaker_embedding(const std::string& path) {
 
     impl_->speaker_embedding = std::move(embedding);
     return true;
-}
-
-bool Qwen3StreamingTts::warm_voice_profile(const TtsStreamOptions& options) {
-    const std::string model_name = NormalizeModelName(options.model_identifier);
-    if (!impl_->engine.is_loaded() || impl_->loaded_model_name != model_name) {
-        if (!impl_->engine.load_models(impl_->model_dir, model_name)) {
-            std::cerr << "Failed to load engine models: " << impl_->engine.get_error() << "\n";
-            return false;
-        }
-        impl_->loaded_model_name = model_name;
-        impl_->caps = impl_->engine.get_model_capabilities();
-    }
-
-    qwen3_tts::tts_params params;
-    params.print_progress = options.print_progress;
-    params.print_timing = options.print_timing;
-    params.max_audio_tokens = options.max_audio_tokens;
-    params.temperature = options.temperature;
-    params.top_k = options.top_k;
-    params.top_p = options.top_p;
-    params.repetition_penalty = options.repetition_penalty;
-    params.streaming_generate = true;
-    params.async_streaming_decode = options.async_streaming_decode;
-    params.play_streaming = false;
-    params.prewarm_streaming = false;
-    params.instruction = options.instruction;
-    params.cache_instruction_tokens = options.cache_instruction_tokens;
-    params.instruction_cache_key = options.instruction_cache_key;
-    params.voice_profile_key = options.warm_voice_profile_key;
-    params.first_tail_window_frames = options.first_tail_window_frames;
-    params.ramp_tail_window_frames = options.ramp_tail_window_frames;
-    params.ramp_tail_window_count = options.ramp_tail_window_count;
-    params.steady_tail_window_frames = options.steady_tail_window_frames;
-    params.context_frames = options.context_frames;
-    params.early_context_frames = options.early_context_frames;
-    params.early_context_window_count = options.early_context_window_count;
-    params.final_context_frames = options.final_context_frames;
-    params.adaptive_steady_windows = options.adaptive_steady_windows;
-    params.adaptive_min_tail_window_frames = options.adaptive_min_tail_window_frames;
-    params.adaptive_low_watermark_ms = options.adaptive_low_watermark_ms;
-    params.adaptive_high_watermark_ms = options.adaptive_high_watermark_ms;
-    params.paced_audio_delivery = options.paced_audio_delivery;
-    params.delivery_chunk_ms = options.delivery_chunk_ms;
-    params.delivery_start_buffer_ms = options.delivery_start_buffer_ms;
-    params.delivery_target_lead_ms = options.delivery_target_lead_ms;
-    params.paced_live_playback = false;
-    params.steady_split_decode_frames = options.steady_split_decode_frames;
-    params.dump_first_frame_profile = false;
-    params.dump_streaming_overlap = false;
-    if (options.hint_header_callback) {
-        params.stream_hint_header_callback =
-            [on_hint_header = options.hint_header_callback](const qwen3_tts::tts_stream_hint_header & header) {
-                TtsStreamHintHeader out;
-                out.sample_rate = header.sample_rate;
-                out.model_type = header.model_type;
-                out.has_instruction = header.has_instruction;
-                out.has_speaker_conditioning = header.has_speaker_conditioning;
-                out.text_token_count = header.text_token_count;
-                out.has_experimental_text_progress = header.has_experimental_text_progress;
-                on_hint_header(out);
-            };
-    }
-
-    return impl_->engine.warm_voice_profile(options.warmup_text, params);
 }
 
 bool Qwen3StreamingTts::synthesize_streaming(
@@ -250,11 +190,9 @@ bool Qwen3StreamingTts::synthesize_streaming(
     params.streaming_generate = true;
     params.async_streaming_decode = options.async_streaming_decode;
     params.play_streaming = options.play_streaming;
-    params.prewarm_streaming = false;
     params.instruction = options.instruction;
     params.cache_instruction_tokens = options.cache_instruction_tokens;
     params.instruction_cache_key = options.instruction_cache_key;
-    params.voice_profile_key = options.warm_voice_profile_key;
     params.live_preroll_ms = options.live_preroll_ms;
     params.first_tail_window_frames = options.first_tail_window_frames;
     params.ramp_tail_window_frames = options.ramp_tail_window_frames;
@@ -319,13 +257,6 @@ bool Qwen3StreamingTts::synthesize_streaming(
                 on_chunk(chunk);
                 return true;
             };
-    }
-
-    if (options.warm_voice_profile) {
-        if (!warm_voice_profile(options)) {
-            std::cerr << "Voice profile warmup failed: " << impl_->engine.get_error() << "\n";
-            return false;
-        }
     }
 
     qwen3_tts::tts_result result;

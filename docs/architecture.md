@@ -1,219 +1,98 @@
-# Workspace Architecture
+# Architecture
 
-## Purpose
-
-This repository is a native Qwen3 TTS workspace with two explicit layers:
-
-- `engine/`: the core C++ TTS engine
-- `apps/streaming_cli/`: a thin streaming harness for experiments, profiling, and integration-style testing
-
-The engine is first-party code in this repository. It is not treated as a vendored third-party subtree.
-
-## High-Level Flow
+## Components
 
 ```text
-streaming_cli
-    ->
-engine C++ API
-    ->
-tokenizer + optional instruction/speaker conditioning + transformer + vocoder
-    ->
-24 kHz mono PCM + optional streaming hint metadata
-    ->
-live playback and/or WAV output
+qwen3_streaming_cli
+        |
+        v
+Qwen3StreamingTts wrapper
+        |
+        v
+Qwen3TTS engine
+  | tokenizer
+  | optional instruction or speaker conditioning
+  | autoregressive talker + residual code predictor
+  | incremental or batch vocoder
+  v
+24 kHz mono PCM + optional hint metadata
 ```
 
-## Model Families
+The wrapper links directly to the engine library. `Qwen3StreamingTts::load()` validates and records the model directory; the selected model is loaded on the first synthesis request and reused until the model name changes.
 
-The engine currently recognizes three model families:
+## Model loading
 
-- `base`
-  - general TTS path
-  - may be used with speaker embeddings / cloned prompts depending on model assets
-- `custom_voice`
-  - speaker-oriented path
-  - supports named or embedding-driven voice selection
-- `voice_design`
-  - instruction-driven persona design
-  - does not use speaker embeddings
+The selected TTS GGUF supplies the text tokenizer, talker transformer, residual code predictor, model-family metadata, and—where supported—the speaker encoder. `qwen3-tts-tokenizer-f16.gguf` supplies the audio decoder/vocoder.
 
-`instruction` is just the transport field. Its runtime meaning depends on the loaded model family.
+The speaker encoder is lazy. The vocoder is also lazy when `QWEN3_TTS_LOW_MEM=1`. By default, model loading primes a short transformer and vocoder path once; set `QWEN3_TTS_PRIME_RUNTIME=0` to disable it.
 
-## Layer Responsibilities
+Model families:
 
-### `engine/`
+- `base`: general synthesis and speaker-embedding voice cloning.
+- `custom_voice`: named-speaker or embedding-conditioned synthesis.
+- `voice_design`: instruction-conditioned synthesis; speaker embeddings are invalid.
 
-Owns:
+## Generation
 
-- GGUF model loading
-- tokenizer and prompt assembly
-- speaker embedding extraction and loading
-- autoregressive speech-code generation
-- streaming decode policy
-- paced PCM delivery
-- streaming hint-track emission
-- optional live playback
-- engine CLI
+Text is encoded as a Qwen assistant message. Instructions are encoded separately as a user message. Exact instruction token sequences may be cached by key for repeated requests.
 
-### `apps/streaming_cli/`
+For every acoustic frame:
 
-Owns:
+1. The talker samples codebook 0, applying repetition penalty, temperature, top-k, and top-p.
+2. EOS terminates generation; thinking tokens are filtered from emitted audio frames.
+3. The residual predictor autoregressively samples codebooks 1–15 with the same temperature/top-k/top-p controls.
+4. The combined codec embedding and trailing text state advance the talker.
+5. The streaming callback receives the complete generated-code prefix.
 
-- harness-facing CLI surface
-- profile aliases and test ergonomics
-- wrapper defaults for streaming experiments
-- VoiceDesign-specific UX checks
-- chunk callback wiring for integration-style tests
-- wrapper-side hint metadata transport
+Generation progress callbacks report completed acoustic frames against `max_audio_tokens`.
 
-## Important Structural Decision
+## Streaming decode
 
-The streaming harness links directly against the engine library.
+The first decode is queued when the first-window frame count is available. Later windows use ramp or steady sizes. Each job includes left-context frames; after vocoder decode, samples produced by that context are dropped and only new PCM is appended.
 
-Old shape:
+With asynchronous decode enabled, one worker processes decode jobs while the generation thread continues producing codes. Shared text-progress state is mutex-protected. The final job uses the configured final context and marks the final callback.
+
+Default engine/wrapper values:
 
 ```text
-wrapper CLI -> shell out to engine CLI
+first/ramp/steady windows: 3 / 6 / 8 frames
+ramp count:                0
+context/early/final:       2 / 1 / 3 frames
+early-context windows:     2
+async decode:              on
+adaptive windows:          off
+paced delivery:            off
+delivery chunk/start:      40 / 40 ms
+delivery target lead:      300 ms
 ```
 
-Current shape:
+`offgrid-callback` changes the first window to 5 frames and enables callback-oriented paced delivery with 240 ms start buffering, 240 ms chunks, and 350 ms target lead.
 
-```text
-wrapper CLI -> direct engine API call
-```
+## Paced delivery
 
-That removes duplicated flag forwarding, subprocess orchestration, and binary-to-binary coupling.
+Vocoder windows are relatively coarse. When pacing is enabled, decoded PCM enters a second buffer and a delivery thread emits smaller callback chunks. Codec provenance is retained as ranges because a paced chunk may overlap more than one vocoder window.
 
-## Streaming Design
+The complete PCM result is still accumulated and written to WAV by both CLIs. Callback delivery does not discard the final output.
 
-The current low-latency path is built around:
+## Hint semantics
 
-- small first decode window
-- a short ramp before steady-state windows
-- reduced early left-context
-- adaptive steady windows when queue depth falls
-- paced PCM delivery for downstream consumers
+The header reports sample rate, model family, conditioning presence, text-token count, and whether experimental text progress is available.
 
-The same streaming path now also supports an optional hint track intended for
-downstream runtime timing systems.
+Each chunk reports:
 
-The hint track is deliberately non-linguistic. It carries:
+- codec-frame and absolute audio-sample ranges;
+- start/end seconds with exclusive end semantics;
+- RMS, peak, zero-crossing rate, and coarse energy class;
+- experimental activity spans and speech occupancy;
+- experimental monotonic text-progress and token-index estimates;
+- paced/final flags.
 
-- stream header metadata such as sample rate, model type, and conditioning presence
-- exact emitted sample ranges
-- codec-frame provenance for each emitted chunk
-- cheap PCM-derived evidence such as RMS, peak, and zero-crossing rate
-- a heuristic energy class: `unknown`, `silence`, `speech_like`, or `burst_like`
-- an experimental monotonic `text_progress` hint derived from full text-token projection similarity against per-frame talker hidden states
+Sample and frame provenance are authoritative. Activity classification is PCM-derived. Text progress compares each talker hidden state against projected text-token embeddings within a constrained forward search window. It is a heuristic cursor, not linguistic alignment.
 
-The hint track does not attempt to provide:
+## Public surfaces
 
-- words
-- phonemes
-- visemes
-- forced alignment
-- final lipsync timings
-
-Those belong in downstream systems that sit above the TTS engine.
-
-Current default startup/steady policy:
-
-- `first_tail_window_frames=5`
-- `ramp_tail_window_frames=6`
-- `ramp_tail_window_count=0`
-- `steady_tail_window_frames=8`
-- `context_frames=3`
-- `early_context_frames=2`
-- `early_context_window_count=2`
-- `adaptive_steady_windows=off`
-- `adaptive_min_tail_window_frames=6`
-- `delivery_chunk_ms=40`
-- `delivery_start_buffer_ms=40`
-- `delivery_target_lead_ms=350`
-- `steady_split_decode_frames=4`
-
-These defaults are a balanced standalone profile. They work well for the built-in local player and remain a reasonable baseline for integrations, but they are not the most aggressive callback-oriented settings.
-
-For callback-driven consumers such as Offgrid/LineCoach, the CLI now exposes an explicit `offgrid-callback` profile:
-
-- `first_tail_window_frames=3`
-- `ramp_tail_window_frames=6`
-- `ramp_tail_window_count=0`
-- `steady_tail_window_frames=8`
-- `context_frames=2`
-- `early_context_frames=1`
-- `early_context_window_count=2`
-- `final_context_frames=3`
-- `adaptive_steady_windows=off`
-- `delivery_chunk_ms=240`
-- `delivery_start_buffer_ms=240`
-- `delivery_target_lead_ms=300`
-- `steady_split_decode_frames=0`
-
-That profile is intended for clients that maintain their own playback queue and want smaller callback arrivals. It is not recommended for the standalone CLI live player, which performs better with the balanced default profile.
-
-## Hint Track Semantics
-
-The current hint payload is aligned to emitted audio chunks, not to a separate
-phonetic or linguistic timeline.
-
-Important conventions:
-
-- `audio_sample_start` and `audio_sample_end` refer to absolute emitted sample positions
-- `audio_sample_end` is exclusive
-- `audio_start_sec` and `audio_end_sec` are derived directly from those sample offsets
-- `codec_frame_start` and `codec_frame_end` describe the generated codec-frame interval
-  that contributed newly emitted audio to the chunk
-- `is_paced_chunk=true` means the chunk came from paced subchunk delivery rather than
-  a single direct decode-window emission
-- `text_progress` is a soft monotonic hint in `[0, 1]`, not a word or phoneme alignment result
-- `text_token_index_estimate` is an estimate over the encoded text-token sequence only
-- `text_progress_confidence` should be treated as a conservative heuristic confidence, not a calibrated probability
-
-Because the engine supports overlap trimming and paced subchunk slicing, a single
-callback chunk is not guaranteed to correspond one-to-one with a single codec frame.
-Frame provenance is therefore expressed as a range.
-
-## VoiceDesign Support
-
-VoiceDesign is a first-class workflow in the harness:
-
-- the wrapper detects `voice_design` metadata from the engine
-- `--voice-design` and `--voice-design-instruct` make the path explicit
-- speaker embeddings are rejected for VoiceDesign models
-- VoiceDesign requires non-empty instruction text
-- fixed-profile VoiceDesign can reuse cached instruction tokens
-- fixed-profile VoiceDesign can do a one-time warmup pass keyed by profile identity
-
-Recommended usage pattern:
-
-1. use VoiceDesign when creating or auditioning a persona
-2. when a persona remains fixed across many lines, reuse a stable cache key
-3. optionally pay one warmup request once per profile before the hot line path
-
-These two reuse mechanisms improve repeated-request startup cost, but they do not materially alter steady streaming decode cadence. Burstiness remains primarily a decode/vocoder scheduling concern.
-
-If the app changes the instruction text per line, do not force all of those lines through the same instruction-token cache key. That would intentionally reuse stale instruction tokens. In that case, keep exact-instruction token caching and reserve the stable profile key for one-time persona warmup.
-
-## Build Layout
-
-```text
-root CMakeLists.txt
-|-- add_subdirectory(engine)
-`-- add_subdirectory(apps/streaming_cli)
-```
-
-Primary binaries:
-
-- `tts_engine_cli`
-- `qwen3_streaming_cli`
-
-## Shared Assets
-
-Shared runtime assets remain at the workspace root:
-
-- `models/`
-- `reference/`
-- `examples/`
-
-That keeps engine and harness runs on the same model and reference data.
+- `engine/src/qwen3_tts.h`: primary C++ API.
+- `engine/src/qwen3_tts_c.h`: compact C ABI for batch-style synthesis and embedding workflows.
+- `apps/streaming_cli/include/offgrid_tts/Qwen3StreamingTts.h`: integration wrapper with callback and hint types.
+- `engine/src/main.cpp`: engine CLI.
+- `apps/streaming_cli/src/cli/main.cpp`: streaming/profile harness.

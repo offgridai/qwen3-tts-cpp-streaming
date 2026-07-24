@@ -854,6 +854,26 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                 text.size(),
                 params.instruction.empty() ? "no" : "yes");
     }
+    if (text.empty()) {
+        result.error_msg = "Text must not be empty";
+        return result;
+    }
+    if (params.max_audio_tokens <= 0) {
+        result.error_msg = "max_audio_tokens must be greater than zero";
+        return result;
+    }
+    if (params.temperature < 0.0f) {
+        result.error_msg = "temperature must be non-negative";
+        return result;
+    }
+    if (params.top_k < 0) {
+        result.error_msg = "top_k must be non-negative";
+        return result;
+    }
+    if (!(params.top_p > 0.0f && params.top_p <= 1.0f)) {
+        result.error_msg = "top_p must be in (0, 1]";
+        return result;
+    }
     auto sample_memory = [&](const char * stage) {
         process_memory_snapshot mem;
         if (!get_process_memory_snapshot(mem)) {
@@ -1044,10 +1064,6 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             params.stream_hint_header_callback(header);
         }
 
-        if (params.prewarm_streaming && params.print_progress) {
-            fprintf(stderr, "Streaming prewarm requested but ignored in simple-and-fast mode\n");
-        }
-
         int32_t last_enqueued_frame = 0;
         int32_t last_completed_frame = 0;
         int32_t next_decode_end = first_window;
@@ -1075,6 +1091,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
         std::atomic<int32_t> hint_chunk_index{0};
         std::vector<frame_text_progress_estimate> frame_text_progress;
         frame_text_progress.reserve((size_t) std::max(1, params.max_audio_tokens));
+        std::mutex frame_text_progress_mutex;
         double last_text_progress_index = 0.0;
 
         std::unique_ptr<StreamingAudioPlayer> live_player;
@@ -1247,6 +1264,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
 
         auto get_chunk_text_progress_estimate = [&](int32_t codec_frame_start, int32_t codec_frame_end) -> chunk_text_progress_estimate {
             chunk_text_progress_estimate estimate;
+            std::lock_guard<std::mutex> lock(frame_text_progress_mutex);
             if (frame_text_progress.empty() || codec_frame_end <= 0) {
                 return estimate;
             }
@@ -1565,7 +1583,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                             codec_frame_end,
                             audio_sample_start,
                             text_content_token_count,
-                            frame_text_progress.empty() ? nullptr : &chunk_text_progress,
+                            text_content_token_count > 0 ? &chunk_text_progress : nullptr,
                             true,
                             is_final);
                     }
@@ -1596,7 +1614,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             if (job.index == 0) {
                 if (trace_stream_detail) {
                     fprintf(stderr, "[stream] first_decode_start wall_ms=%lld queued_ms=%lld local_frames=%d\n",
-                            (long long) decode_start_ms,
+                            (long long) dequeue_ms,
                             (long long) job.queued_ms,
                             job.local_frames);
                 }
@@ -1676,7 +1694,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                     job.end_frame,
                     appended_audio_sample_start,
                     text_content_token_count,
-                    frame_text_progress.empty() ? nullptr : &chunk_text_progress,
+                    text_content_token_count > 0 ? &chunk_text_progress : nullptr,
                     false,
                     job.is_final);
                 if (params.stream_hint_chunk_callback && !params.stream_hint_chunk_callback(hint)) {
@@ -1934,8 +1952,14 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             if (stream_error.load()) {
                 return false;
             }
-            while ((int32_t) frame_text_progress.size() < frames_available) {
-                frame_text_progress.push_back(estimate_latest_frame_text_progress());
+            if (!is_final && self.progress_callback_) {
+                self.progress_callback_(frames_available, params.max_audio_tokens);
+            }
+            {
+                std::lock_guard<std::mutex> lock(frame_text_progress_mutex);
+                while ((int32_t) frame_text_progress.size() < frames_available) {
+                    frame_text_progress.push_back(estimate_latest_frame_text_progress());
+                }
             }
             if (is_final) {
                 return enqueue_tail_window(all_codes, frames_available, true);
@@ -1977,7 +2001,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                                                                 speaker_embedding, params.max_audio_tokens, speech_codes,
                                                                 on_frame,
                                                                 params.language_id, params.repetition_penalty,
-                                                                params.temperature, params.top_k,
+                                                                params.temperature, params.top_k, params.top_p,
                                                                 instruct_tokens.empty() ? nullptr : instruct_tokens.data(),
                                                                 (int32_t) instruct_tokens.size(),
                                                                 params.dump_first_frame_profile ? &first_frame_profile : nullptr);
@@ -2075,7 +2099,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
         if (!self.transformer_.generate(text_tokens.data(), (int32_t) text_tokens.size(),
                                         speaker_embedding, params.max_audio_tokens, speech_codes,
                                         params.language_id, params.repetition_penalty,
-                                        params.temperature, params.top_k,
+                                        params.temperature, params.top_k, params.top_p,
                                         instruct_tokens.empty() ? nullptr : instruct_tokens.data(),
                                         (int32_t) instruct_tokens.size())) {
             result.error_msg = "Failed to generate speech codes: " + self.transformer_.get_error();

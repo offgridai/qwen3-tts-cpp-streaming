@@ -24,6 +24,33 @@ int32_t argmax_generate(const float * data, int32_t n) {
     return max_idx;
 }
 
+void apply_top_p(std::vector<float> & probabilities, float top_p) {
+    if (!(top_p > 0.0f && top_p < 1.0f)) {
+        return;
+    }
+
+    std::vector<int32_t> indices(probabilities.size());
+    for (size_t i = 0; i < indices.size(); ++i) {
+        indices[i] = (int32_t) i;
+    }
+    std::sort(indices.begin(), indices.end(), [&](int32_t a, int32_t b) {
+        return probabilities[(size_t) a] > probabilities[(size_t) b];
+    });
+
+    double cumulative = 0.0;
+    bool keep = true;
+    for (int32_t index : indices) {
+        if (!keep) {
+            probabilities[(size_t) index] = 0.0f;
+            continue;
+        }
+        cumulative += probabilities[(size_t) index];
+        if (cumulative >= top_p) {
+            keep = false;
+        }
+    }
+}
+
 } // namespace
 
 bool TTSTransformer::generate(const int32_t * text_tokens, int32_t n_tokens,
@@ -33,10 +60,11 @@ bool TTSTransformer::generate(const int32_t * text_tokens, int32_t n_tokens,
                               float repetition_penalty,
                               float temperature,
                               int32_t top_k,
+                              float top_p,
                               const int32_t * instruct_tokens,
                               int32_t n_instruct_tokens) {
     return generate_streaming(text_tokens, n_tokens, speaker_embd, max_len, output, nullptr,
-                              language_id, repetition_penalty, temperature, top_k,
+                              language_id, repetition_penalty, temperature, top_k, top_p,
                               instruct_tokens, n_instruct_tokens);
 }
 
@@ -48,6 +76,7 @@ bool TTSTransformer::generate_streaming(const int32_t * text_tokens, int32_t n_t
                                         float repetition_penalty,
                                         float temperature,
                                         int32_t top_k,
+                                        float top_p,
                                         const int32_t * instruct_tokens,
                                         int32_t n_instruct_tokens,
                                         tts_generation_first_frame_profile * first_frame_profile) {
@@ -250,6 +279,7 @@ bool TTSTransformer::generate_streaming(const int32_t * text_tokens, int32_t n_t
             for (int32_t i = 0; i < cfg.codec_vocab_size; ++i) {
                 probs[i] = (float) (probs[i] / sum);
             }
+            apply_top_p(probs, top_p);
 
             std::discrete_distribution<int32_t> dist(probs.begin(), probs.end());
             next_token = dist(impl_->rng);
@@ -293,7 +323,7 @@ bool TTSTransformer::generate_streaming(const int32_t * text_tokens, int32_t n_t
 #endif
         std::vector<int32_t> codes_1_15;
         if (!predict_codes_autoregressive(last_hidden_.data(), frame_codes[0], codes_1_15,
-                                          temperature, top_k, frame)) {
+                                          temperature, top_k, top_p, frame)) {
             return false;
         }
 #ifdef QWEN3_TTS_TIMING

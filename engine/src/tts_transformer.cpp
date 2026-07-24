@@ -15,21 +15,6 @@ const tts_transformer_config & TTSTransformer::get_config() const {
     return impl_->model.config;
 }
 
-bool TTSTransformer::forward(const int32_t * tokens, int32_t n_tokens, int32_t n_past,
-                             std::vector<float> & output) {
-    return forward_text(tokens, n_tokens, nullptr, n_past, output);
-}
-
-bool TTSTransformer::forward_with_audio(const int32_t * tokens, int32_t n_tokens,
-                                        const float * audio_embd, int32_t n_audio,
-                                        int32_t audio_start_pos, int32_t n_past,
-                                        std::vector<float> & output) {
-    (void) audio_embd;
-    (void) n_audio;
-    (void) audio_start_pos;
-    return forward_text(tokens, n_tokens, nullptr, n_past, output);
-}
-
 void free_transformer_model(tts_transformer_model & model) {
     if (model.buffer) {
         ggml_backend_buffer_free(model.buffer);

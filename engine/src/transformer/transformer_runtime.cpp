@@ -161,36 +161,6 @@ bool TTSTransformer::forward_prefill(const float * prefill_embd, int32_t n_token
     return true;
 }
 
-bool TTSTransformer::forward_text(const int32_t * text_tokens, int32_t n_tokens,
-                                  const float * speaker_embd, int32_t n_past,
-                                  std::vector<float> & output) {
-    if (!text_tokens) {
-        error_msg_ = "text_tokens is null";
-        return false;
-    }
-    if (n_tokens <= 0) {
-        error_msg_ = "n_tokens must be > 0";
-        return false;
-    }
-
-    std::vector<float> projected;
-    if (!transformer_internal::ops::project_text_tokens(*this, text_tokens, n_tokens, projected)) {
-        return false;
-    }
-
-    if (speaker_embd) {
-        const int32_t hidden_size = impl_->model.config.hidden_size;
-        for (int32_t t = 0; t < n_tokens; ++t) {
-            float * row = projected.data() + (size_t) t * hidden_size;
-            for (int32_t h = 0; h < hidden_size; ++h) {
-                row[h] += speaker_embd[h];
-            }
-        }
-    }
-
-    return forward_prefill(projected.data(), n_tokens, n_past, output, nullptr);
-}
-
 bool TTSTransformer::forward_step(const float * step_embd, int32_t n_past,
                                   std::vector<float> & output,
                                   std::vector<float> * hidden_out) {
@@ -330,18 +300,6 @@ bool TTSTransformer::forward_step(const float * step_embd, int32_t n_past,
 #endif
 
     return true;
-}
-
-bool TTSTransformer::forward_codec(int32_t codec_token, int32_t n_past,
-                                   std::vector<float> & output) {
-    std::vector<float> codec_row;
-    if (!transformer_internal::ops::lookup_embedding_rows(*this, impl_->model.codec_embd, &codec_token, 1,
-                               "inp_legacy_codec_token", "legacy_codec_row",
-                               codec_row)) {
-        return false;
-    }
-
-    return forward_step(codec_row.data(), n_past, output, nullptr);
 }
 
 } // namespace qwen3_tts

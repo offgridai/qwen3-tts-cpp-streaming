@@ -28,7 +28,6 @@ static qwen3_tts::tts_params convert_params(qwen3_tts_params_t params) {
     p.temperature = params.temperature;
     p.top_p = params.top_p;
     p.top_k = params.top_k;
-    p.n_threads = params.n_threads;
     p.print_progress = params.print_progress != 0;
     p.print_timing = params.print_timing != 0;
     p.repetition_penalty = params.repetition_penalty;

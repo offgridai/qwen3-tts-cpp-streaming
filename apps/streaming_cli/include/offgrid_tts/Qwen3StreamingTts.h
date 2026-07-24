@@ -110,9 +110,6 @@ struct TtsStreamOptions {
     bool async_streaming_decode = true;
     bool cache_instruction_tokens = false;
     std::string instruction_cache_key;
-    bool warm_voice_profile = false;
-    std::string warm_voice_profile_key;
-    std::string warmup_text = "Hello.";
     std::function<void(const TtsStreamHintHeader&)> hint_header_callback;
 };
 
@@ -125,7 +122,6 @@ public:
 
     bool load(const std::string& model_dir);
     bool load_speaker_embedding(const std::string& path);
-    bool warm_voice_profile(const TtsStreamOptions& options);
     bool synthesize_streaming(const std::string& text, const TtsStreamOptions& options, TtsChunkCallback on_chunk);
 
 private:

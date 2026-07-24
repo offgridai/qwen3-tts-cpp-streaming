@@ -46,27 +46,6 @@ public:
     bool encode(const float * samples, int32_t n_samples,
                 std::vector<float> & embedding);
 
-    // Legacy interface for compatibility (not used for speaker encoding)
-    bool encode(const float * samples, int32_t n_samples,
-                std::vector<int32_t> & codes, int32_t & n_frames) {
-        (void) samples;
-        (void) n_samples;
-        (void) codes;
-        (void) n_frames;
-        error_msg_ = "Use encode(samples, n_samples, embedding) for speaker encoding";
-        return false;
-    }
-
-    // Legacy interface (not used)
-    bool get_embeddings(const int32_t * codes, int32_t n_frames,
-                        std::vector<float> & embeddings) {
-        (void) codes;
-        (void) n_frames;
-        (void) embeddings;
-        error_msg_ = "Use encode() for speaker embedding extraction";
-        return false;
-    }
-
     const speaker_encoder_config & get_config() const;
 
     const std::string & get_error() const { return error_msg_; }
@@ -80,12 +59,5 @@ private:
 
 // Free model resources
 void free_speaker_encoder_model(speaker_encoder_model & model);
-
-// Backward compatibility aliases
-using audio_encoder_config = speaker_encoder_config;
-using audio_encoder_model = speaker_encoder_model;
-inline void free_audio_encoder_model(audio_encoder_model & model) {
-    free_speaker_encoder_model(model);
-}
 
 } // namespace qwen3_tts
