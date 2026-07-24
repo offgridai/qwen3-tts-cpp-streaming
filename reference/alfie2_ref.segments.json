@@ -1,0 +1,80 @@
+{
+  "output_wav": "C:\\git\\qwen3-tts-cpp-streaming\\reference\\alfie2_ref.wav",
+  "fidelity_preset": "high",
+  "render_path": "batch",
+  "segmentation": "per-sentence",
+  "segment_count": 2,
+  "settings": {
+    "temperature": 0.35,
+    "top_k": 16,
+    "top_p": 0.95,
+    "repetition_penalty": 1.02,
+    "max_tokens": 320,
+    "takes_per_segment": 1,
+    "segment_gap_ms": 90.0,
+    "fade_ms": 12.0,
+    "trim_silence": false,
+    "trim_threshold": 0.01,
+    "trim_pad_ms": 35.0
+  },
+  "segment_selection": [
+    {
+      "segment_index": 1,
+      "text": "I was not expecting visitors this late.",
+      "selected_file": "C:\\git\\qwen3-tts-cpp-streaming\\reference\\alfie2_ref_segments\\001.wav",
+      "selected_score": {
+        "worst_halfsec": 0.647,
+        "worst_region": 1.287,
+        "mean_top3_halfsec": 0.644
+      },
+      "candidates": [
+        {
+          "take": 1,
+          "file": "C:\\git\\qwen3-tts-cpp-streaming\\reference\\alfie2_ref_segments\\001.wav",
+          "selection_score": {
+            "worst_halfsec": 0.647,
+            "worst_region": 1.287,
+            "mean_top3_halfsec": 0.644
+          }
+        }
+      ]
+    },
+    {
+      "segment_index": 2,
+      "text": "What a pleasure it is to meet you here.",
+      "selected_file": "C:\\git\\qwen3-tts-cpp-streaming\\reference\\alfie2_ref_segments\\002.wav",
+      "selected_score": {
+        "worst_halfsec": 0.696,
+        "worst_region": 1.235,
+        "mean_top3_halfsec": 0.6833333333333332
+      },
+      "candidates": [
+        {
+          "take": 1,
+          "file": "C:\\git\\qwen3-tts-cpp-streaming\\reference\\alfie2_ref_segments\\002.wav",
+          "selection_score": {
+            "worst_halfsec": 0.696,
+            "worst_region": 1.235,
+            "mean_top3_halfsec": 0.6833333333333332
+          }
+        }
+      ]
+    }
+  ],
+  "segments": [
+    {
+      "text": "I was not expecting visitors this late.",
+      "file": "C:\\git\\qwen3-tts-cpp-streaming\\reference\\alfie2_ref_segments\\001.wav",
+      "start_sec": 0.0,
+      "end_sec": 2.377,
+      "duration_sec": 2.377
+    },
+    {
+      "text": "What a pleasure it is to meet you here.",
+      "file": "C:\\git\\qwen3-tts-cpp-streaming\\reference\\alfie2_ref_segments\\002.wav",
+      "start_sec": 2.467,
+      "end_sec": 5.244,
+      "duration_sec": 2.777
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "output_wav": "C:\\git\\qwen3-tts-cpp-streaming\\reference\\alfie2.wav",
+  "fidelity_preset": "default",
+  "render_path": "stream",
+  "segmentation": "joined",
+  "segment_count": 1,
+  "settings": {
+    "temperature": 0.9,
+    "top_k": 75,
+    "top_p": 1.0,
+    "repetition_penalty": 1.02,
+    "max_tokens": null,
+    "segment_gap_ms": 0.0,
+    "fade_ms": 0.0,
+    "trim_silence": false,
+    "trim_threshold": 0.01,
+    "trim_pad_ms": 35.0
+  },
+  "segments": [
+    {
+      "text": "Welcome to the bodega. I'm Alfie. How can I help you today? We have sandwiches for five dollars and chips for two. As for variety, we have turkey, ham and veggie sandwiches. I prefer the turkey myself. Nice and juicy.",
+      "start_sec": 0.0,
+      "end_sec": null
+    }
+  ]
+}
