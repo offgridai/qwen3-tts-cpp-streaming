@@ -2,12 +2,16 @@
 #include "decoder/decoder_state_internal.h"
 
 #include <chrono>
+#include <cstdlib>
 #include <cstdio>
 
 namespace qwen3_tts {
 
 bool AudioTokenizerDecoder::decode(const int32_t * codes, int32_t n_frames,
                                     std::vector<float> & samples) {
+    using profile_clock = std::chrono::steady_clock;
+    const bool profile = std::getenv("QWEN3_TTS_PROFILE_DECODER") != nullptr;
+    const auto t_start = profile_clock::now();
     auto & model = impl_->model;
     auto & state = impl_->state;
     auto & error_msg = impl_->error_msg;
@@ -24,6 +28,7 @@ bool AudioTokenizerDecoder::decode(const int32_t * codes, int32_t n_frames,
     if (!decoder_internal::ops::ensure_cached_decode_graph(*this, n_frames)) {
         return false;
     }
+    const auto t_graph = profile_clock::now();
 
     struct ggml_cgraph * gf = state.decode_graph;
 
@@ -31,6 +36,7 @@ bool AudioTokenizerDecoder::decode(const int32_t * codes, int32_t n_frames,
         error_msg = "Failed to allocate graph";
         return false;
     }
+    const auto t_alloc = profile_clock::now();
 
     if ((int32_t) codebook_input_bufs.size() != cfg.n_codebooks) {
         codebook_input_bufs.assign(cfg.n_codebooks, {});
@@ -61,12 +67,14 @@ bool AudioTokenizerDecoder::decode(const int32_t * codes, int32_t n_frames,
         ggml_backend_tensor_set(state.decode_positions_tensor, positions_buf.data(), 0,
                                 (size_t) n_frames * sizeof(int32_t));
     }
+    const auto t_upload = profile_clock::now();
 
     if (ggml_backend_sched_graph_compute(state.sched, gf) != GGML_STATUS_SUCCESS) {
         error_msg = "Failed to compute graph";
         ggml_backend_sched_reset(state.sched);
         return false;
     }
+    const auto t_compute = profile_clock::now();
 
     struct ggml_tensor * audio_tensor = state.decode_audio_tensor;
     if (!audio_tensor) {
@@ -78,8 +86,26 @@ bool AudioTokenizerDecoder::decode(const int32_t * codes, int32_t n_frames,
     int64_t n_samples = audio_tensor->ne[0];
     samples.resize(n_samples);
     ggml_backend_tensor_get(audio_tensor, samples.data(), 0, n_samples * sizeof(float));
+    const auto t_download = profile_clock::now();
 
     ggml_backend_sched_reset(state.sched);
+    const auto t_end = profile_clock::now();
+
+    if (profile) {
+        auto ms = [](auto begin, auto end) {
+            return std::chrono::duration<double, std::milli>(end - begin).count();
+        };
+        fprintf(stderr,
+                "[decoder-profile] frames=%d graph=%.3f alloc=%.3f upload=%.3f compute=%.3f download=%.3f reset=%.3f total=%.3f\n",
+                n_frames,
+                ms(t_start, t_graph),
+                ms(t_graph, t_alloc),
+                ms(t_alloc, t_upload),
+                ms(t_upload, t_compute),
+                ms(t_compute, t_download),
+                ms(t_download, t_end),
+                ms(t_start, t_end));
+    }
 
     return true;
 }

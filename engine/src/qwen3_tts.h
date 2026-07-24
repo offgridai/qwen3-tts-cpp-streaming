@@ -80,15 +80,23 @@ struct tts_stream_hint_chunk {
 struct tts_params {
     // Maximum number of audio tokens to generate
     int32_t max_audio_tokens = 4096;
+
+    // Text-relative safety ceiling. Set the ratio to 0 to use only max_audio_tokens.
+    float max_audio_frames_per_text_token = 5.0f;
+    int32_t min_dynamic_audio_tokens = 64;
     
     // Temperature for sampling (0 = greedy)
-    float temperature = 0.9f;
+    float temperature = 0.75f;
     
     // Top-p sampling
-    float top_p = 1.0f;
+    float top_p = 0.9f;
+
+    // Codebook 0 controls semantic progression and EOS. Restrictive nucleus
+    // filtering here can prevent natural termination.
+    float cb0_top_p = 1.0f;
     
     // Top-k sampling (0 = disabled)
-    int32_t top_k = 75;
+    int32_t top_k = 16;
     
     // Print progress during generation
     bool print_progress = false;
@@ -97,7 +105,10 @@ struct tts_params {
     bool print_timing = true;
     
     // Repetition penalty for CB0 token generation (HuggingFace style)
-    float repetition_penalty = 1.05f;
+    float repetition_penalty = 1.02f;
+
+    // Sampling seed. Negative values select a fresh nondeterministic seed.
+    int64_t seed = -1;
 
     // Language ID for codec (2050=en, 2069=ru, 2055=zh, 2058=ja, 2064=ko,
     // 2053=de, 2061=fr, 2054=es, 2070=it, 2071=pt)
@@ -193,6 +204,12 @@ struct tts_result {
     int64_t t_generate_ms = 0;
     int64_t t_decode_ms = 0;
     int64_t t_total_ms = 0;
+
+    // Generation completion diagnostics.
+    int32_t generated_audio_tokens = 0;
+    bool reached_eos = false;
+    bool hit_token_limit = false;
+    bool hit_dynamic_token_limit = false;
 
     // Process memory snapshots (bytes)
     uint64_t mem_rss_start_bytes = 0;

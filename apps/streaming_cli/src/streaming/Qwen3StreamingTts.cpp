@@ -183,10 +183,14 @@ bool Qwen3StreamingTts::synthesize_streaming(
     params.print_progress = options.print_progress;
     params.print_timing = options.print_timing;
     params.max_audio_tokens = options.max_audio_tokens;
+    params.max_audio_frames_per_text_token = options.max_audio_frames_per_text_token;
+    params.min_dynamic_audio_tokens = options.min_dynamic_audio_tokens;
     params.temperature = options.temperature;
     params.top_k = options.top_k;
     params.top_p = options.top_p;
+    params.cb0_top_p = options.cb0_top_p;
     params.repetition_penalty = options.repetition_penalty;
+    params.seed = options.seed;
     params.streaming_generate = true;
     params.async_streaming_decode = options.async_streaming_decode;
     params.play_streaming = options.play_streaming;

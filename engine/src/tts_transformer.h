@@ -108,6 +108,10 @@ public:
     
     // Clear code predictor KV cache
     void clear_code_pred_kv_cache();
+
+    // Reset request-local sampling state.
+    void set_seed(uint32_t seed);
+    bool last_generation_reached_eos() const { return last_generation_reached_eos_; }
     
     bool forward_prefill(const float * prefill_embd, int32_t n_tokens,
                          int32_t n_past, std::vector<float> & output,
@@ -126,9 +130,9 @@ public:
     // output: generated codes for codebooks 1-15 [15]
     bool predict_codes_autoregressive(const float * hidden, int32_t codebook_0_token, 
                                        std::vector<int32_t> & output,
-                                       float temperature = 0.9f,
-                                       int32_t top_k = 50,
-                                       float top_p = 1.0f,
+                                       float temperature = 0.75f,
+                                       int32_t top_k = 16,
+                                       float top_p = 0.9f,
                                        int32_t trace_frame = -1);
     
     // Generate speech codes autoregressively
@@ -140,10 +144,11 @@ public:
                   const float * speaker_embd, int32_t max_len,
                   std::vector<int32_t> & output,
                   int32_t language_id = 2050,
-                  float repetition_penalty = 1.05f,
-                  float temperature = 0.9f,
-                  int32_t top_k = 75,
-                  float top_p = 1.0f,
+                  float repetition_penalty = 1.02f,
+                  float temperature = 0.75f,
+                  int32_t top_k = 16,
+                  float cb0_top_p = 1.0f,
+                  float residual_top_p = 0.9f,
                   const int32_t * instruct_tokens = nullptr,
                   int32_t n_instruct_tokens = 0);
 
@@ -156,10 +161,11 @@ public:
                             std::vector<int32_t> & output,
                             tts_generation_frame_callback_t on_frame,
                             int32_t language_id = 2050,
-                            float repetition_penalty = 1.05f,
-                            float temperature = 0.9f,
-                            int32_t top_k = 75,
-                            float top_p = 1.0f,
+                            float repetition_penalty = 1.02f,
+                            float temperature = 0.75f,
+                            int32_t top_k = 16,
+                            float cb0_top_p = 1.0f,
+                            float residual_top_p = 0.9f,
                             const int32_t * instruct_tokens = nullptr,
                             int32_t n_instruct_tokens = 0,
                             tts_generation_first_frame_profile * first_frame_profile = nullptr);
@@ -180,6 +186,7 @@ private:
     
     // Cached hidden states from last forward pass
     std::vector<float> last_hidden_;
+    bool last_generation_reached_eos_ = false;
 };
 
 } // namespace qwen3_tts

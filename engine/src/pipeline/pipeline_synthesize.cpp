@@ -12,6 +12,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <random>
 #include <thread>
 #include <vector>
 
@@ -862,6 +863,14 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
         result.error_msg = "max_audio_tokens must be greater than zero";
         return result;
     }
+    if (params.max_audio_frames_per_text_token < 0.0f) {
+        result.error_msg = "max_audio_frames_per_text_token must be non-negative";
+        return result;
+    }
+    if (params.min_dynamic_audio_tokens <= 0) {
+        result.error_msg = "min_dynamic_audio_tokens must be greater than zero";
+        return result;
+    }
     if (params.temperature < 0.0f) {
         result.error_msg = "temperature must be non-negative";
         return result;
@@ -873,6 +882,15 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
     if (!(params.top_p > 0.0f && params.top_p <= 1.0f)) {
         result.error_msg = "top_p must be in (0, 1]";
         return result;
+    }
+    if (!(params.cb0_top_p > 0.0f && params.cb0_top_p <= 1.0f)) {
+        result.error_msg = "cb0_top_p must be in (0, 1]";
+        return result;
+    }
+    if (params.seed >= 0) {
+        self.transformer_.set_seed((uint32_t) params.seed);
+    } else {
+        self.transformer_.set_seed(std::random_device{}());
     }
     auto sample_memory = [&](const char * stage) {
         process_memory_snapshot mem;
@@ -946,6 +964,15 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
     if (!params.instruction.empty() && instruct_tokens.empty()) {
         result.error_msg = "Failed to tokenize instruction";
         return result;
+    }
+
+    int32_t generation_token_limit = params.max_audio_tokens;
+    if (params.max_audio_frames_per_text_token > 0.0f) {
+        const int32_t text_relative_limit = std::max(
+            params.min_dynamic_audio_tokens,
+            (int32_t) std::ceil(
+                params.max_audio_frames_per_text_token * (float) std::max(1, text_content_token_count)));
+        generation_token_limit = std::min(generation_token_limit, text_relative_limit);
     }
 
     if (params.print_progress) {
@@ -1034,9 +1061,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
         const int32_t ramp_window_count = std::max<int32_t>(0, params.ramp_tail_window_count);
         const int32_t steady_window = clamp_positive(params.steady_tail_window_frames, 8);
         const int32_t context_frames = std::max<int32_t>(0, params.context_frames);
-        const int32_t early_context_frames = params.early_context_frames > 0
-            ? std::max<int32_t>(0, params.early_context_frames)
-            : context_frames;
+        const int32_t early_context_frames = std::max<int32_t>(0, params.early_context_frames);
         const int32_t early_context_window_count = std::max<int32_t>(0, params.early_context_window_count);
         const int32_t final_context_frames = std::max<int32_t>(context_frames, params.final_context_frames > 0 ? params.final_context_frames : context_frames);
         const int32_t sample_rate = self.audio_decoder_.get_config().sample_rate;
@@ -1090,7 +1115,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
         tts_generation_first_frame_profile first_frame_profile{};
         std::atomic<int32_t> hint_chunk_index{0};
         std::vector<frame_text_progress_estimate> frame_text_progress;
-        frame_text_progress.reserve((size_t) std::max(1, params.max_audio_tokens));
+        frame_text_progress.reserve((size_t) std::max(1, generation_token_limit));
         std::mutex frame_text_progress_mutex;
         double last_text_progress_index = 0.0;
 
@@ -1953,7 +1978,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                 return false;
             }
             if (!is_final && self.progress_callback_) {
-                self.progress_callback_(frames_available, params.max_audio_tokens);
+                self.progress_callback_(frames_available, generation_token_limit);
             }
             {
                 std::lock_guard<std::mutex> lock(frame_text_progress_mutex);
@@ -1998,10 +2023,10 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
         }
 
         bool generate_ok = self.transformer_.generate_streaming(text_tokens.data(), (int32_t) text_tokens.size(),
-                                                                speaker_embedding, params.max_audio_tokens, speech_codes,
+                                                                speaker_embedding, generation_token_limit, speech_codes,
                                                                 on_frame,
                                                                 params.language_id, params.repetition_penalty,
-                                                                params.temperature, params.top_k, params.top_p,
+                                                                params.temperature, params.top_k, params.cb0_top_p, params.top_p,
                                                                 instruct_tokens.empty() ? nullptr : instruct_tokens.data(),
                                                                 (int32_t) instruct_tokens.size(),
                                                                 params.dump_first_frame_profile ? &first_frame_profile : nullptr);
@@ -2023,6 +2048,10 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
         sample_memory("synth/after-generate-streaming");
 
         n_frames = (int) speech_codes.size() / n_codebooks;
+        result.generated_audio_tokens = n_frames;
+        result.reached_eos = self.transformer_.last_generation_reached_eos();
+        result.hit_token_limit = !result.reached_eos && n_frames >= generation_token_limit;
+        result.hit_dynamic_token_limit = result.hit_token_limit && generation_token_limit < params.max_audio_tokens;
 
         if (params.print_progress) {
             fprintf(stderr, "Speech codes generated: %d frames x %d codebooks\n", n_frames, n_codebooks);
@@ -2097,9 +2126,9 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
         }
     } else {
         if (!self.transformer_.generate(text_tokens.data(), (int32_t) text_tokens.size(),
-                                        speaker_embedding, params.max_audio_tokens, speech_codes,
+                                        speaker_embedding, generation_token_limit, speech_codes,
                                         params.language_id, params.repetition_penalty,
-                                        params.temperature, params.top_k, params.top_p,
+                                        params.temperature, params.top_k, params.cb0_top_p, params.top_p,
                                         instruct_tokens.empty() ? nullptr : instruct_tokens.data(),
                                         (int32_t) instruct_tokens.size())) {
             result.error_msg = "Failed to generate speech codes: " + self.transformer_.get_error();
@@ -2109,6 +2138,10 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
         sample_memory("synth/after-generate");
 
         n_frames = (int) speech_codes.size() / n_codebooks;
+        result.generated_audio_tokens = n_frames;
+        result.reached_eos = self.transformer_.last_generation_reached_eos();
+        result.hit_token_limit = !result.reached_eos && n_frames >= generation_token_limit;
+        result.hit_dynamic_token_limit = result.hit_token_limit && generation_token_limit < params.max_audio_tokens;
 
         if (params.print_progress) {
             fprintf(stderr, "Speech codes generated: %d frames x %d codebooks\n", n_frames, n_codebooks);
@@ -2162,6 +2195,11 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
     result.success = true;
     result.t_total_ms = get_time_ms() - t_total_start - live_playback_wait_ms - excluded_timing_ms;
     if (result.t_total_ms < 0) { result.t_total_ms = 0; }
+    if (params.print_timing) {
+        fprintf(stderr, "  Generation termination: %s (%d audio tokens)\n",
+                result.reached_eos ? "eos" : (result.hit_dynamic_token_limit ? "safety_limit" : (result.hit_token_limit ? "token_limit" : "stopped")),
+                result.generated_audio_tokens);
+    }
     sample_memory("synth/end");
 
     if (params.print_timing) {

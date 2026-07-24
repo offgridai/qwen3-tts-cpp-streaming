@@ -134,6 +134,7 @@ struct tts_transformer_private {
     tts_transformer_state state;
     std::vector<ggml_fp16_t> embd_row_fp16_scratch;
     std::mt19937 rng{std::random_device{}()};
+    std::mt19937 residual_rng{std::random_device{}()};
     CoreMLCodePredictor coreml_code_predictor;
     bool use_coreml_code_predictor = false;
     std::string coreml_code_predictor_path;

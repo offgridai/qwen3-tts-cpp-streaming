@@ -129,7 +129,7 @@ bool transformer_internal::ops::predict_codes_autoregressive_coreml(TTSTransform
 
         apply_top_p(code_probs.data(), vocab_size, top_p);
         std::discrete_distribution<int32_t> dist(code_probs.begin(), code_probs.begin() + vocab_size);
-        return dist(impl->rng);
+        return dist(impl->residual_rng);
     };
 
     memcpy(seq_embd.data(), hidden, (size_t) cfg.hidden_size * sizeof(float));
@@ -284,7 +284,7 @@ bool TTSTransformer::predict_codes_autoregressive(const float * hidden, int32_t 
         }
         apply_top_p(code_probs.data(), vocab_size, top_p);
         std::discrete_distribution<int32_t> dist(code_probs.begin(), code_probs.begin() + vocab_size);
-        return dist(impl_->rng);
+        return dist(impl_->residual_rng);
     };
 
     std::vector<float> cb0_embd(cfg.hidden_size);

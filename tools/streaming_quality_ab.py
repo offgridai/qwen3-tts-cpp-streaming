@@ -40,8 +40,14 @@ def parse_args() -> argparse.Namespace:
         help=f"Base model name. Default: {DEFAULT_MODEL_NAME}",
     )
     parser.add_argument("--temperature", type=float, default=0.75, help="Sampling temperature. Default: 0.75")
+    parser.add_argument("--seed", type=int, default=42, help="Deterministic sampling seed. Default: 42")
     parser.add_argument("--top-k", type=int, default=16, help="Top-k sampling. Default: 16")
     parser.add_argument("--top-p", type=float, default=0.9, help="Top-p sampling. Default: 0.9")
+    parser.add_argument("--context-frames", type=int, help="Override streaming context frames.")
+    parser.add_argument("--early-context-frames", type=int, help="Override early streaming context frames.")
+    parser.add_argument("--first-window-frames", type=int, help="Override first streaming decoder window size.")
+    parser.add_argument("--adaptive-min-tail-window-frames", type=int, help="Override minimum adaptive window size.")
+    parser.add_argument("--offgrid-callback-profile", action="store_true", help="Use the paced offgrid callback window policy.")
     parser.add_argument(
         "--repetition-penalty",
         type=float,
@@ -75,6 +81,8 @@ def build_base_command(args: argparse.Namespace, cli_path: Path, input_json: Pat
         str(args.top_p),
         "--repetition-penalty",
         str(args.repetition_penalty),
+        "--seed",
+        str(args.seed),
         "-t",
         args.text,
         "-o",
@@ -134,6 +142,33 @@ def main() -> int:
         cmd = build_base_command(args, cli_path, input_json, wav_path)
         cmd.extend(["--streaming-generate", "--no-play-streaming"])
         cmd.extend(STREAMING_PRESETS[preset])
+        if args.offgrid_callback_profile:
+            cmd.extend([
+                "--first-tail-window-frames", "5",
+                "--ramp-tail-window-frames", "5",
+                "--ramp-tail-window-count", "2",
+                "--steady-tail-window-frames", "8",
+                "--context-frames", "2",
+                "--early-context-frames", "1",
+                "--early-context-window-count", "2",
+                "--final-context-frames", "3",
+                "--adaptive-steady-windows",
+                "--adaptive-min-tail-window-frames", "7",
+                "--adaptive-low-watermark-ms", "220",
+                "--adaptive-high-watermark-ms", "520",
+                "--paced-audio-delivery",
+                "--delivery-chunk-ms", "240",
+                "--delivery-start-buffer-ms", "240",
+                "--delivery-target-lead-ms", "520",
+            ])
+        if args.context_frames is not None:
+            cmd.extend(["--context-frames", str(args.context_frames)])
+        if args.early_context_frames is not None:
+            cmd.extend(["--early-context-frames", str(args.early_context_frames)])
+        if args.first_window_frames is not None:
+            cmd.extend(["--first-tail-window-frames", str(args.first_window_frames)])
+        if args.adaptive_min_tail_window_frames is not None:
+            cmd.extend(["--adaptive-min-tail-window-frames", str(args.adaptive_min_tail_window_frames)])
         print("Running:", subprocess.list2cmdline(cmd))
         if subprocess.run(cmd, cwd=PROJECT_ROOT).returncode != 0:
             return 1
@@ -148,6 +183,12 @@ def main() -> int:
             "top_k": args.top_k,
             "top_p": args.top_p,
             "repetition_penalty": args.repetition_penalty,
+            "seed": args.seed,
+            "context_frames": args.context_frames,
+            "early_context_frames": args.early_context_frames,
+            "first_window_frames": args.first_window_frames,
+            "adaptive_min_tail_window_frames": args.adaptive_min_tail_window_frames,
+            "offgrid_callback_profile": args.offgrid_callback_profile,
         },
         "runs": runs,
     }

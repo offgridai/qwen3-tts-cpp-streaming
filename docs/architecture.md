@@ -24,7 +24,7 @@ The wrapper links directly to the engine library. `Qwen3StreamingTts::load()` va
 
 The selected TTS GGUF supplies the text tokenizer, talker transformer, residual code predictor, model-family metadata, and—where supported—the speaker encoder. `qwen3-tts-tokenizer-f16.gguf` supplies the audio decoder/vocoder.
 
-The speaker encoder is lazy. The vocoder is also lazy when `QWEN3_TTS_LOW_MEM=1`. By default, model loading primes a short transformer and vocoder path once; set `QWEN3_TTS_PRIME_RUNTIME=0` to disable it.
+The speaker encoder is lazy. The vocoder is also lazy when `QWEN3_TTS_LOW_MEM=1`. By default, model loading primes a short transformer and first vocoder path once. Set `QWEN3_TTS_PRIME_RUNTIME=full` to prime the steady vocoder shape too, or `0` to disable priming.
 
 Model families:
 
@@ -38,9 +38,9 @@ Text is encoded as a Qwen assistant message. Instructions are encoded separately
 
 For every acoustic frame:
 
-1. The talker samples codebook 0, applying repetition penalty, temperature, top-k, and top-p.
+1. The talker samples semantic codebook 0, applying repetition penalty, temperature, top-k, and its separate CB0 top-p control. CB0 top-p defaults to 1.0 to protect EOS reliability.
 2. EOS terminates generation; thinking tokens are filtered from emitted audio frames.
-3. The residual predictor autoregressively samples codebooks 1–15 with the same temperature/top-k/top-p controls.
+3. The residual predictor autoregressively samples codebooks 1–15 with temperature, top-k, and the regular acoustic top-p control. It uses an independent seeded RNG so acoustic settings do not change the semantic random stream.
 4. The combined codec embedding and trailing text state advance the talker.
 5. The streaming callback receives the complete generated-code prefix.
 
@@ -66,7 +66,7 @@ delivery chunk/start:      40 / 40 ms
 delivery target lead:      300 ms
 ```
 
-`offgrid-callback` changes the first window to 5 frames and enables callback-oriented paced delivery with 240 ms start buffering, 240 ms chunks, and 350 ms target lead.
+`offgrid-callback` uses a 5-frame first window, two 5-frame ramp windows, 2-frame left context, and adaptive 7-8-frame steady windows. Callback delivery uses 240 ms chunks, starts at a 350 ms preroll, then permits up to 520 ms of steady lead to cover the larger decode windows.
 
 ## Paced delivery
 

@@ -72,6 +72,16 @@ def parse_args() -> argparse.Namespace:
         default=350.0,
         help="Target downstream callback buffer size. Default: 350 ms",
     )
+    parser.add_argument("--seed", type=int, help="Optional deterministic sampling seed.")
+    parser.add_argument("--adaptive-min-window", type=int, help="Enable adaptive windows with this minimum size.")
+    parser.add_argument("--adaptive-low-ms", type=int, default=220)
+    parser.add_argument("--adaptive-high-ms", type=int, default=520)
+    parser.add_argument("--context-frames", type=int, help="Override steady decoder left context.")
+    parser.add_argument("--first-window-frames", type=int, help="Override the first decoder window size.")
+    parser.add_argument("--early-context-frames", type=int, help="Override left context for the early decoder windows.")
+    parser.add_argument("--ramp-window-frames", type=int, help="Override the post-start ramp window size.")
+    parser.add_argument("--ramp-window-count", type=int, help="Override the number of ramp windows.")
+    parser.add_argument("--delivery-target-lead-ms", type=int, help="Override paced delivery target lead.")
     parser.add_argument(
         "--extra-args",
         nargs="*",
@@ -118,6 +128,29 @@ def parse_metrics(log_text: str, target_buffer_ms: float) -> dict[str, object]:
         "delivered_chunks": len(deliveries),
         "deliveries": deliveries,
     }
+    if first_full_buffer_ms is not None:
+        start_index = next(
+            i for i, delivery in enumerate(deliveries)
+            if delivery["cumulative_audio_ms"] >= target_buffer_ms
+        )
+        playback_buffer_ms = float(deliveries[start_index]["cumulative_audio_ms"])
+        previous_wall_ms = int(deliveries[start_index]["wall_ms_since_request"])
+        minimum_headroom_ms = playback_buffer_ms
+        simulated_underruns = 0
+        for delivery in deliveries[start_index + 1:]:
+            wall_ms = int(delivery["wall_ms_since_request"])
+            playback_buffer_ms -= wall_ms - previous_wall_ms
+            minimum_headroom_ms = min(minimum_headroom_ms, playback_buffer_ms)
+            if playback_buffer_ms < 0:
+                simulated_underruns += 1
+                playback_buffer_ms = 0.0
+            playback_buffer_ms += float(delivery["audio_ms"])
+            previous_wall_ms = wall_ms
+        metrics.update({
+            "simulated_playback_start_ms": first_full_buffer_ms,
+            "minimum_playback_headroom_ms": round(minimum_headroom_ms, 1),
+            "simulated_playback_underruns": simulated_underruns,
+        })
 
     for match in INT_METRIC_RE.finditer(log_text):
         label = match.group("label").strip().lower().replace(" ", "_")
@@ -163,6 +196,26 @@ def main() -> int:
         str(output_wav),
     ]
     cmd.extend(args.extra_args)
+    if args.seed is not None:
+        cmd.extend(["--seed", str(args.seed)])
+    if args.adaptive_min_window is not None:
+        cmd.extend([
+            "--adaptive-steady-windows", "--adaptive-min-tail-window-frames", str(args.adaptive_min_window),
+            "--adaptive-low-watermark-ms", str(args.adaptive_low_ms),
+            "--adaptive-high-watermark-ms", str(args.adaptive_high_ms),
+        ])
+    if args.context_frames is not None:
+        cmd.extend(["--context-frames", str(args.context_frames)])
+    if args.first_window_frames is not None:
+        cmd.extend(["--first-tail-window-frames", str(args.first_window_frames)])
+    if args.early_context_frames is not None:
+        cmd.extend(["--early-context-frames", str(args.early_context_frames)])
+    if args.ramp_window_frames is not None:
+        cmd.extend(["--ramp-tail-window-frames", str(args.ramp_window_frames)])
+    if args.ramp_window_count is not None:
+        cmd.extend(["--ramp-tail-window-count", str(args.ramp_window_count)])
+    if args.delivery_target_lead_ms is not None:
+        cmd.extend(["--delivery-target-lead-ms", str(args.delivery_target_lead_ms)])
 
     completed = subprocess.run(
         cmd,
@@ -188,6 +241,8 @@ def main() -> int:
     print(f"Second window gap: {metrics.get('second_window_gap_ms')} ms")
     print(f"Max window gap: {metrics.get('max_window_gap_ms')} ms")
     print(f"Max paced gap: {metrics.get('max_paced_gap')} ms")
+    print(f"Minimum playback headroom: {metrics.get('minimum_playback_headroom_ms')} ms")
+    print(f"Simulated playback underruns: {metrics.get('simulated_playback_underruns')}")
 
     if args.output_json:
         output_json = args.output_json.resolve()

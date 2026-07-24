@@ -75,14 +75,67 @@ void compute_mel_filterbank_slaney(float * filterbank, int n_mels, int n_fft,
     }
 }
 
-void compute_dft(const float * input, float * real, float * imag, int n) {
-    for (int k = 0; k < n; ++k) {
-        real[k] = 0.0f;
-        imag[k] = 0.0f;
-        for (int t = 0; t < n; ++t) {
-            const float angle = -2.0f * k_pi * k * t / n;
-            real[k] += input[t] * cosf(angle);
-            imag[k] += input[t] * sinf(angle);
+void compute_fft(const float * input, float * real, float * imag, int n) {
+    if (n <= 0) {
+        return;
+    }
+    for (int i = 0; i < n; ++i) {
+        real[i] = input[i];
+        imag[i] = 0.0f;
+    }
+
+    // Speaker encoder models use a power-of-two FFT size. Keep a defensive
+    // direct transform for unusual converted models rather than silently
+    // producing invalid features.
+    if ((n & (n - 1)) != 0) {
+        std::vector<float> direct_real((size_t) n, 0.0f);
+        std::vector<float> direct_imag((size_t) n, 0.0f);
+        for (int k = 0; k < n; ++k) {
+            for (int t = 0; t < n; ++t) {
+                const float angle = -2.0f * k_pi * (float) k * (float) t / (float) n;
+                direct_real[(size_t) k] += input[t] * cosf(angle);
+                direct_imag[(size_t) k] += input[t] * sinf(angle);
+            }
+        }
+        std::copy(direct_real.begin(), direct_real.end(), real);
+        std::copy(direct_imag.begin(), direct_imag.end(), imag);
+        return;
+    }
+
+    for (int i = 1, j = 0; i < n; ++i) {
+        int bit = n >> 1;
+        for (; j & bit; bit >>= 1) {
+            j ^= bit;
+        }
+        j ^= bit;
+        if (i < j) {
+            std::swap(real[i], real[j]);
+            std::swap(imag[i], imag[j]);
+        }
+    }
+
+    for (int len = 2; len <= n; len <<= 1) {
+        const float angle = -2.0f * k_pi / (float) len;
+        const float step_real = cosf(angle);
+        const float step_imag = sinf(angle);
+        for (int base = 0; base < n; base += len) {
+            float twiddle_real = 1.0f;
+            float twiddle_imag = 0.0f;
+            for (int offset = 0; offset < len / 2; ++offset) {
+                const int even = base + offset;
+                const int odd = even + len / 2;
+                const float odd_real = real[odd] * twiddle_real - imag[odd] * twiddle_imag;
+                const float odd_imag = real[odd] * twiddle_imag + imag[odd] * twiddle_real;
+                const float even_real = real[even];
+                const float even_imag = imag[even];
+                real[even] = even_real + odd_real;
+                imag[even] = even_imag + odd_imag;
+                real[odd] = even_real - odd_real;
+                imag[odd] = even_imag - odd_imag;
+                const float next_real = twiddle_real * step_real - twiddle_imag * step_imag;
+                twiddle_imag = twiddle_real * step_imag + twiddle_imag * step_real;
+                twiddle_real = next_real;
+            }
         }
     }
 }
@@ -164,7 +217,7 @@ bool encoder_internal::ops::compute_mel_spectrogram(AudioTokenizerEncoder & self
             frame[i] = padded[start + i] * state.stft_window[i];
         }
 
-        compute_dft(frame.data(), fft_real.data(), fft_imag.data(), cfg.n_fft);
+        compute_fft(frame.data(), fft_real.data(), fft_imag.data(), cfg.n_fft);
 
         for (int k = 0; k < n_fft_bins; ++k) {
             magnitude[k] = sqrtf(fft_real[k] * fft_real[k] + fft_imag[k] * fft_imag[k] + 1e-9f);

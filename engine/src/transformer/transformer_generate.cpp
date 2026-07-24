@@ -53,6 +53,11 @@ void apply_top_p(std::vector<float> & probabilities, float top_p) {
 
 } // namespace
 
+void TTSTransformer::set_seed(uint32_t seed) {
+    impl_->rng.seed(seed);
+    impl_->residual_rng.seed(seed ^ 0x9E3779B9u);
+}
+
 bool TTSTransformer::generate(const int32_t * text_tokens, int32_t n_tokens,
                               const float * speaker_embd, int32_t max_len,
                               std::vector<int32_t> & output,
@@ -60,11 +65,12 @@ bool TTSTransformer::generate(const int32_t * text_tokens, int32_t n_tokens,
                               float repetition_penalty,
                               float temperature,
                               int32_t top_k,
-                              float top_p,
+                              float cb0_top_p,
+                              float residual_top_p,
                               const int32_t * instruct_tokens,
                               int32_t n_instruct_tokens) {
     return generate_streaming(text_tokens, n_tokens, speaker_embd, max_len, output, nullptr,
-                              language_id, repetition_penalty, temperature, top_k, top_p,
+                              language_id, repetition_penalty, temperature, top_k, cb0_top_p, residual_top_p,
                               instruct_tokens, n_instruct_tokens);
 }
 
@@ -76,10 +82,12 @@ bool TTSTransformer::generate_streaming(const int32_t * text_tokens, int32_t n_t
                                         float repetition_penalty,
                                         float temperature,
                                         int32_t top_k,
-                                        float top_p,
+                                        float cb0_top_p,
+                                        float residual_top_p,
                                         const int32_t * instruct_tokens,
                                         int32_t n_instruct_tokens,
                                         tts_generation_first_frame_profile * first_frame_profile) {
+    last_generation_reached_eos_ = false;
 #ifdef QWEN3_TTS_TIMING
     using clk = std::chrono::high_resolution_clock;
     tts_timing timing = {};
@@ -279,7 +287,7 @@ bool TTSTransformer::generate_streaming(const int32_t * text_tokens, int32_t n_t
             for (int32_t i = 0; i < cfg.codec_vocab_size; ++i) {
                 probs[i] = (float) (probs[i] / sum);
             }
-            apply_top_p(probs, top_p);
+            apply_top_p(probs, cb0_top_p);
 
             std::discrete_distribution<int32_t> dist(probs.begin(), probs.end());
             next_token = dist(impl_->rng);
@@ -290,6 +298,7 @@ bool TTSTransformer::generate_streaming(const int32_t * text_tokens, int32_t n_t
         }
 
         if (next_token == cfg.codec_eos_id) {
+            last_generation_reached_eos_ = true;
             if (trace_frame) {
                 int32_t eos_token = next_token;
                 char eos_name[128];
@@ -323,7 +332,7 @@ bool TTSTransformer::generate_streaming(const int32_t * text_tokens, int32_t n_t
 #endif
         std::vector<int32_t> codes_1_15;
         if (!predict_codes_autoregressive(last_hidden_.data(), frame_codes[0], codes_1_15,
-                                          temperature, top_k, top_p, frame)) {
+                                          temperature, top_k, residual_top_p, frame)) {
             return false;
         }
 #ifdef QWEN3_TTS_TIMING

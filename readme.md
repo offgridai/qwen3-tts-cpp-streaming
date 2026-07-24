@@ -92,7 +92,7 @@ build-ninja-cuda\engine\tts_engine_cli.exe `
   -o examples\clone.wav
 ```
 
-Add `--batch` for a single full vocoder decode. Streaming generation is the default. Sampling supports temperature, top-k, top-p nucleus filtering, and CB0 repetition penalty.
+Add `--batch` for a single full vocoder decode. Streaming generation is the default. Listening-selected sampling defaults are temperature 0.75, top-k 16, residual top-p 0.9, repetition penalty 1.02, and semantic CB0 top-p 1.0. Sampling supports deterministic `--seed` and explicit overrides. A text-relative safety ceiling prevents short prompts from running to the absolute token limit; tune it with `--max-frames-per-text-token` and `--min-dynamic-tokens`.
 
 ## Streaming CLI
 
@@ -115,7 +115,7 @@ Profiles:
 | `realtime` | 0.6B F16 | 3 frames | raw decode windows |
 | `memory-saver` | 0.6B Q5_K | 3 frames | raw decode windows |
 | `ultra-low` | 0.6B Q4_K | 3 frames | raw decode windows |
-| `offgrid-callback` | caller-selected | 5 frames | paced, 240 ms start/chunks, 350 ms target lead |
+| `offgrid-callback` | caller-selected | 5 frames | two 5-frame ramp windows, then adaptive 7-8-frame windows with 2-frame context; 350 ms callback preroll, 520 ms steady lead |
 
 The default streaming policy uses 3/6/8-frame first/ramp/steady windows, 2 frames of left context, 1 early-context frame for the first two windows, 3 final-context frames, asynchronous decode, adaptive windows off, and paced delivery off.
 
@@ -151,6 +151,8 @@ See [docs/architecture.md](docs/architecture.md) for the execution flow and conc
 
 See [docs/performance-baseline-0.6b.md](docs/performance-baseline-0.6b.md) for the initial 0.6B CUDA performance baseline, fidelity limitations, and optimization roadmap.
 
+See [docs/optimization-results-0.6b.md](docs/optimization-results-0.6b.md) for measured results from the first optimization pass.
+
 ## Retained tools
 
 | Tool | Purpose |
@@ -164,6 +166,7 @@ See [docs/performance-baseline-0.6b.md](docs/performance-baseline-0.6b.md) for t
 | `speaker_embedding_smoke_test.py` | Validate an embedding through synthesis |
 | `streaming_quality_ab.py` | Compare batch and streaming output |
 | `streaming_callback_benchmark.py` | Measure callback startup and cadence |
+| `streaming_regression_benchmark.py` | Run a deterministic reliability/performance corpus |
 | `detect_synthetic_spans.py` | Heuristic artifact scoring for WAV files |
 
 Generated WAVs, reports, caches, models, and temporary run directories are ignored by Git.
@@ -171,7 +174,7 @@ Generated WAVs, reports, caches, models, and temporary run directories are ignor
 ## Runtime controls
 
 - `QWEN3_TTS_LOW_MEM=1`: lazily load and unload large components to reduce residency.
-- `QWEN3_TTS_PRIME_RUNTIME=0`: disable the default load-time transformer/vocoder runtime prime.
+- `QWEN3_TTS_PRIME_RUNTIME=full`: also prime the steady vocoder shape; `0` disables all runtime priming.
 - `QWEN3_TTS_GGML_DEBUG=1`: include GGML debug logging.
 - `QWEN3_TTS_USE_COREML=1`: enable the CoreML code predictor on supported macOS builds.
 

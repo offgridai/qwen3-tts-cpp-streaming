@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <condition_variable>
+#include <cstdio>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
@@ -17,6 +18,7 @@
 #endif
 #include <windows.h>
 #include <mmsystem.h>
+#include <io.h>
 #pragma comment(lib, "winmm.lib")
 #endif
 
@@ -694,6 +696,15 @@ private:
 } // namespace
 
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    // PowerShell renders native stderr as errors. This CLI's output is diagnostic,
+    // so keep all native and C++ logging on the regular stdout stream.
+    std::fflush(stderr);
+    _dup2(_fileno(stdout), _fileno(stderr));
+    SetStdHandle(STD_ERROR_HANDLE, GetStdHandle(STD_OUTPUT_HANDLE));
+#endif
+    std::cerr.rdbuf(std::cout.rdbuf());
+
     std::string model_dir = "models";
     std::string speaker_embedding;
     std::string text = "Hello. Welcome to Alfie's Bodega. I'm Alfie. What can I get for you today?";
@@ -726,10 +737,14 @@ int main(int argc, char** argv) {
         else if (a == "--voice-design-instruct") options.instruction = next();
         else if (a == "--instruction" || a == "--instruct") options.instruction = next();
         else if (a == "--max-tokens") options.max_audio_tokens = std::stoi(next());
+        else if (a == "--max-frames-per-text-token") options.max_audio_frames_per_text_token = std::stof(next());
+        else if (a == "--min-dynamic-tokens") options.min_dynamic_audio_tokens = std::stoi(next());
         else if (a == "--temperature") options.temperature = std::stof(next());
         else if (a == "--top-k") options.top_k = std::stoi(next());
         else if (a == "--top-p") options.top_p = std::stof(next());
+        else if (a == "--cb0-top-p") options.cb0_top_p = std::stof(next());
         else if (a == "--repetition-penalty") options.repetition_penalty = std::stof(next());
+        else if (a == "--seed") options.seed = std::stoll(next());
         else if (a == "--quiet") { options.print_progress = false; options.print_timing = true; }
         else if (a == "--quiet-all") { options.print_progress = false; options.print_timing = false; }
         else if (a == "--verbose") { options.print_progress = true; options.print_timing = true; }
@@ -782,21 +797,21 @@ int main(int argc, char** argv) {
             } else if (profile == "offgrid-callback") {
                 options.live_preroll_ms = 150;
                 options.first_tail_window_frames = 5;
-                options.ramp_tail_window_frames = 6;
-                options.ramp_tail_window_count = 0;
+                options.ramp_tail_window_frames = 5;
+                options.ramp_tail_window_count = 2;
                 options.steady_tail_window_frames = 8;
                 options.context_frames = 2;
                 options.early_context_frames = 1;
                 options.early_context_window_count = 2;
                 options.final_context_frames = 3;
-                options.adaptive_steady_windows = false;
-                options.adaptive_min_tail_window_frames = 6;
+                options.adaptive_steady_windows = true;
+                options.adaptive_min_tail_window_frames = 7;
                 options.adaptive_low_watermark_ms = 220;
                 options.adaptive_high_watermark_ms = 520;
                 options.paced_audio_delivery = true;
                 options.delivery_chunk_ms = 240;
                 options.delivery_start_buffer_ms = 240;
-                options.delivery_target_lead_ms = 350;
+                options.delivery_target_lead_ms = 520;
                 options.steady_split_decode_frames = 0;
             } else {
                 std::cerr << "Unknown --tts-profile '" << profile << "'. Expected realtime, memory-saver, ultra-low, or offgrid-callback.\n";
@@ -843,9 +858,13 @@ int main(int argc, char** argv) {
                       << "  --instruction <text>\n"
                       << "  --max-tokens <int>\n"
                       << "  --temperature <float>\n"
+                      << "  --max-frames-per-text-token <float>\n"
+                      << "  --min-dynamic-tokens <integer>\n"
                       << "  --top-k <int>\n"
                       << "  --top-p <float>\n"
+                      << "  --cb0-top-p <float>\n"
                       << "  --repetition-penalty <float>\n"
+                      << "  --seed <integer>\n"
                       << "  --quiet | --quiet-all | --verbose\n"
                       << "  --tts-profile realtime|memory-saver|ultra-low|offgrid-callback\n"
                       << "  --callback-playback | --linecoach-proxy-playback\n"

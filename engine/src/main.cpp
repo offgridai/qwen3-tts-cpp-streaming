@@ -57,11 +57,15 @@ void print_usage(const char * program) {
     fprintf(stderr, "  --speaker <name>       Named speaker (CustomVoice models)\n");
     fprintf(stderr, "  --speaker-embedding <file> Use precomputed speaker embedding (.json/.bin)\n");
     fprintf(stderr, "  --dump-speaker-embedding <file> Save extracted embedding from --reference\n");
-    fprintf(stderr, "  --temperature <val>    Sampling temperature (default: 0.9, 0=greedy)\n");
-    fprintf(stderr, "  --top-k <n>            Top-k sampling (default: 75, 0=disabled)\n");
-    fprintf(stderr, "  --top-p <val>          Top-p sampling (default: 1.0)\n");
+    fprintf(stderr, "  --temperature <val>    Sampling temperature (default: 0.75, 0=greedy)\n");
+    fprintf(stderr, "  --top-k <n>            Top-k sampling (default: 16, 0=disabled)\n");
+    fprintf(stderr, "  --top-p <val>          Residual-codebook top-p sampling (default: 0.9)\n");
+    fprintf(stderr, "  --cb0-top-p <val>      Semantic CB0 top-p; values below 1 may impair EOS (default: 1.0)\n");
     fprintf(stderr, "  --max-tokens <n>       Maximum audio tokens (default: 4096)\n");
-    fprintf(stderr, "  --repetition-penalty <val> Repetition penalty (default: 1.05)\n");
+    fprintf(stderr, "  --max-frames-per-text-token <val> Dynamic safety ratio (default: 5.0, 0=off)\n");
+    fprintf(stderr, "  --min-dynamic-tokens <n> Minimum dynamic safety ceiling (default: 64)\n");
+    fprintf(stderr, "  --repetition-penalty <val> Repetition penalty (default: 1.02)\n");
+    fprintf(stderr, "  --seed <n>             Sampling seed; omit for nondeterministic generation\n");
     fprintf(stderr, "  -l, --language <lang>  Language: en,ru,zh,ja,ko,de,fr,es,it,pt (default: en)\n");
     fprintf(stderr, "  --instruction <instr>  Style/voice instruction\n");
     fprintf(stderr, "  --instruct <text>      Voice steering instructions (e.g. \"whispering\")\n");
@@ -201,18 +205,42 @@ int main(int argc, char ** argv) {
                 return 1;
             }
             params.top_p = std::stof(args[i]);
+        } else if (arg == "--cb0-top-p") {
+            if (++i >= (int) args.size()) {
+                fprintf(stderr, "Error: missing CB0 top-p value\n");
+                return 1;
+            }
+            params.cb0_top_p = std::stof(args[i]);
         } else if (arg == "--max-tokens") {
             if (++i >= (int) args.size()) {
                 fprintf(stderr, "Error: missing max-tokens value\n");
                 return 1;
             }
             params.max_audio_tokens = std::stoi(args[i]);
+        } else if (arg == "--max-frames-per-text-token") {
+            if (++i >= (int) args.size()) {
+                fprintf(stderr, "Error: missing dynamic token ratio\n");
+                return 1;
+            }
+            params.max_audio_frames_per_text_token = std::stof(args[i]);
+        } else if (arg == "--min-dynamic-tokens") {
+            if (++i >= (int) args.size()) {
+                fprintf(stderr, "Error: missing dynamic token minimum\n");
+                return 1;
+            }
+            params.min_dynamic_audio_tokens = std::stoi(args[i]);
         } else if (arg == "--repetition-penalty") {
             if (++i >= (int) args.size()) {
                 fprintf(stderr, "Error: missing repetition-penalty value\n");
                 return 1;
             }
             params.repetition_penalty = std::stof(args[i]);
+        } else if (arg == "--seed") {
+            if (++i >= (int) args.size()) {
+                fprintf(stderr, "Error: missing seed value\n");
+                return 1;
+            }
+            params.seed = std::stoll(args[i]);
         } else if (arg == "-l" || arg == "--language") {
             if (++i >= (int) args.size()) {
                 fprintf(stderr, "Error: missing language value\n");
