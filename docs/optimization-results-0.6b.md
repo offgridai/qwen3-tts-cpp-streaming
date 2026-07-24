@@ -1,6 +1,6 @@
 # Qwen3-TTS 0.6B optimization results
 
-These results compare `codex/optimize-0.6b-baseline` with the committed 2026-07-24 RTX 5090 baseline. The original baseline remains in `performance-baseline-0.6b.md`.
+These results explain the experiments that moved the original 2026-07-24 RTX 5090 baseline to the accepted state in `performance-baseline-0.6b-current.md`. The original baseline remains in `performance-baseline-0.6b.md`.
 
 ## Accepted results
 

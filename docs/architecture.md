@@ -44,7 +44,13 @@ For every acoustic frame:
 4. The combined codec embedding and trailing text state advance the talker.
 5. The streaming callback receives the complete generated-code prefix.
 
-Generation progress callbacks report completed acoustic frames against `max_audio_tokens`.
+The listening-selected defaults are temperature 0.75, top-k 16, residual top-p 0.9, repetition penalty 1.02, and semantic CB0 top-p 1.0. Generation progress callbacks report completed acoustic frames against the effective limit. By default that limit is the smaller of `max_audio_tokens` and five frames per content token, with a 64-frame minimum. Results distinguish natural EOS, the text-relative safety limit, and the absolute token limit.
+
+## Voice cloning
+
+Base models accept either a reference WAV or a stored 1,024-value speaker embedding. The speaker encoder expects 24 kHz mono audio and is loaded lazily. The frontend uses a radix-2 FFT for log-mel extraction; a 20.3-second reference takes about 249 ms after model initialization on the baseline RTX 5090.
+
+Stored embeddings avoid repeat extraction and are model-family-specific. The repository includes `lana` and `priestley` 0.6B F16 references and embeddings under `reference/`.
 
 ## Streaming decode
 
@@ -96,3 +102,5 @@ Sample and frame provenance are authoritative. Activity classification is PCM-de
 - `apps/streaming_cli/include/offgrid_tts/Qwen3StreamingTts.h`: integration wrapper with callback and hint types.
 - `engine/src/main.cpp`: engine CLI.
 - `apps/streaming_cli/src/cli/main.cpp`: streaming/profile harness.
+
+The Windows streaming CLI routes diagnostic output to stdout so PowerShell does not render normal engine logs as errors. The engine CLI retains conventional stderr diagnostics.

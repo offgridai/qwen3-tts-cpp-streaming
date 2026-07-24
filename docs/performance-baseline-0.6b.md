@@ -1,6 +1,6 @@
 # Qwen3-TTS 0.6B performance baseline
 
-This is the initial optimization baseline for the native streaming path. Results are local measurements, not portable model claims.
+This is the historical pre-optimization baseline for the native streaming path. Results are local measurements, not portable model claims. See `performance-baseline-0.6b-current.md` for the accepted baseline on current `main`.
 
 ## Test context
 

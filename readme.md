@@ -12,7 +12,11 @@ reference/              Reusable speaker embeddings and reference audio
 tools/                  Model conversion and operational quality utilities
 docs/architecture.md    Runtime architecture and streaming semantics
 docs/performance-baseline-0.6b.md
-                        Dated 0.6B benchmark and optimization targets
+                        Historical pre-optimization benchmark
+docs/performance-baseline-0.6b-current.md
+                        Accepted current-main benchmark and reproduction
+docs/performance-baseline-0.6b-current.json
+                        Machine-readable current-main scores
 ```
 
 `engine/ggml/` is built as part of the workspace. The streaming CLI links directly to `tts_engine`; it does not launch the engine CLI as a subprocess.
@@ -92,6 +96,17 @@ build-ninja-cuda\engine\tts_engine_cli.exe `
   -o examples\clone.wav
 ```
 
+Committed 0.6B clone assets include `lana_0.6b_f16.json`/`lana_ref.wav` and `priestley_0.6b_f16.json`/`priestley_ref.wav` under `reference/`.
+
+Extract a new embedding from a clean mono 24 kHz WAV:
+
+```powershell
+py -3 tools\wav_to_speaker_embedding.py `
+  --input-wav reference\voice_ref.wav `
+  --output-json reference\voice_0.6b_f16.json `
+  --model-name qwen3-tts-0.6b-f16.gguf
+```
+
 Add `--batch` for a single full vocoder decode. Streaming generation is the default. Listening-selected sampling defaults are temperature 0.75, top-k 16, residual top-p 0.9, repetition penalty 1.02, and semantic CB0 top-p 1.0. Sampling supports deterministic `--seed` and explicit overrides. A text-relative safety ceiling prevents short prompts from running to the absolute token limit; tune it with `--max-frames-per-text-token` and `--min-dynamic-tokens`.
 
 ## Streaming CLI
@@ -118,6 +133,8 @@ Profiles:
 | `offgrid-callback` | caller-selected | 5 frames | two 5-frame ramp windows, then adaptive 7-8-frame windows with 2-frame context; 350 ms callback preroll, 520 ms steady lead |
 
 The default streaming policy uses 3/6/8-frame first/ramp/steady windows, 2 frames of left context, 1 early-context frame for the first two windows, 3 final-context frames, asynchronous decode, adaptive windows off, and paced delivery off.
+
+On Windows, `qwen3_streaming_cli.exe` writes diagnostics to stdout. Pipe it directly to `Tee-Object`; `2>&1` is unnecessary.
 
 ## VoiceDesign and reusable voices
 
@@ -150,6 +167,8 @@ The hint track is not word, phoneme, viseme, or forced alignment. Sample end pos
 See [docs/architecture.md](docs/architecture.md) for the execution flow and concurrency model.
 
 See [docs/performance-baseline-0.6b.md](docs/performance-baseline-0.6b.md) for the initial 0.6B CUDA performance baseline, fidelity limitations, and optimization roadmap.
+
+See [docs/performance-baseline-0.6b-current.md](docs/performance-baseline-0.6b-current.md) for the authoritative current-main performance, fidelity, cadence, and reproduction baseline.
 
 See [docs/optimization-results-0.6b.md](docs/optimization-results-0.6b.md) for measured results from the first optimization pass.
 
