@@ -10,71 +10,13 @@
 #include <functional>
 #include <cstdint>
 #include <unordered_map>
+#include <memory>
 
 namespace qwen3_tts {
+class StreamingAudioPlayer;
 namespace pipeline_internal {
 struct ops;
 }
-
-struct tts_stream_hint_header {
-    int32_t sample_rate = 24000;
-    std::string model_type;
-    bool has_instruction = false;
-    bool has_speaker_conditioning = false;
-    int32_t text_token_count = 0;
-    bool has_experimental_text_progress = false;
-};
-
-enum class tts_hint_energy_class : uint8_t {
-    unknown = 0,
-    silence = 1,
-    speech_like = 2,
-    burst_like = 3,
-};
-
-enum class tts_hint_activity_class : uint8_t {
-    unknown = 0,
-    silence = 1,
-    speech_like = 2,
-    burst_like = 3,
-};
-
-struct tts_stream_activity_span {
-    int64_t audio_sample_start = 0;
-    int64_t audio_sample_end = 0;
-    double audio_start_sec = 0.0;
-    double audio_end_sec = 0.0;
-    tts_hint_activity_class activity_class = tts_hint_activity_class::unknown;
-    float confidence = 0.0f;
-    bool is_experimental = true;
-};
-
-struct tts_stream_hint_chunk {
-    int32_t chunk_index = 0;
-    int32_t codec_frame_start = 0;
-    int32_t codec_frame_end = 0;
-    int64_t audio_sample_start = 0;
-    int64_t audio_sample_end = 0;
-    double audio_start_sec = 0.0;
-    double audio_end_sec = 0.0;
-    float rms_energy = 0.0f;
-    float peak_energy = 0.0f;
-    float zero_crossing_rate = 0.0f;
-    tts_hint_energy_class energy_class = tts_hint_energy_class::unknown;
-    bool has_speech = false;
-    float speech_occupancy = 0.0f;
-    std::vector<tts_stream_activity_span> activity_spans;
-    double text_progress_start = 0.0;
-    double text_progress_end = 0.0;
-    double text_progress = 0.0;
-    int32_t text_token_index_start_estimate = -1;
-    int32_t text_token_index_end_estimate = -1;
-    int32_t text_token_index_estimate = -1;
-    float text_progress_confidence = 0.0f;
-    bool is_text_progress_experimental = false;
-    bool is_paced_chunk = false;
-    bool is_final = false;
-};
 
 // TTS generation parameters
 struct tts_params {
@@ -179,8 +121,6 @@ struct tts_params {
     bool paced_live_playback = false;
     int32_t steady_split_decode_frames = 0;
     std::function<bool(const float * samples, int32_t n_samples, int32_t sample_rate, bool is_final)> audio_chunk_callback;
-    std::function<void(const tts_stream_hint_header & header)> stream_hint_header_callback;
-    std::function<bool(const tts_stream_hint_chunk & chunk)> stream_hint_chunk_callback;
 };
 
 // TTS generation result
@@ -198,7 +138,6 @@ struct tts_result {
     std::string error_msg;
     
     // Timing info (in milliseconds)
-    int64_t t_load_ms = 0;
     int64_t t_tokenize_ms = 0;
     int64_t t_encode_ms = 0;
     int64_t t_generate_ms = 0;
@@ -293,6 +232,14 @@ public:
 
     // Return feature flags for the currently loaded model.
     tts_model_capabilities get_model_capabilities() const;
+
+    // Re-run the small transformer/vocoder prime used during model loading.
+    // Intended for callers that want to wake an idle GPU before a request.
+    bool prime_streaming_runtime(bool include_steady_decode = false,
+                                 bool print_timing = false);
+
+    // Open and retain the Windows streaming playback device before synthesis.
+    bool prepare_streaming_playback();
     
 private:
     friend struct pipeline_internal::ops;
@@ -312,6 +259,7 @@ private:
     std::string decoder_model_path_;
     tts_progress_callback_t progress_callback_;
     std::unordered_map<std::string, std::vector<int32_t>> instruction_token_cache_;
+    std::shared_ptr<StreamingAudioPlayer> live_player_;
 };
 
 // Utility: Load audio file (WAV format)

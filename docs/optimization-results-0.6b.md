@@ -18,7 +18,7 @@ The clone speedup replaces the speaker frontend's per-frame O(N²) DFT with a ra
 
 Initialization now primes the transformer and first vocoder path but skips the 392 ms steady-window vocoder pass. Set `QWEN3_TTS_PRIME_RUNTIME=full` to restore full eager priming or `0` to disable priming. The default trades approximately 9 ms of resident first-buffer latency for a substantially faster cold path.
 
-The final `offgrid-callback` profile uses a 5-frame first window, two 5-frame ramp windows, 2-frame context, and adaptive 7-8-frame steady windows. Playback still starts at a 350 ms preroll; delivery may build 520 ms of lead afterward. Short and long seeded probes reported zero simulated underruns, 21-54 ms minimum headroom, and 1.21-1.25x real-time throughput.
+The final `offgrid-callback` profile uses a 5-frame first window, two 5-frame ramp windows, 2-frame context, and adaptive 7-8-frame steady windows. The benchmark models a 350 ms downstream buffer and permits 520 ms of lead afterward. Short and long seeded probes reported zero simulated underruns, 21-54 ms minimum headroom, and 1.21-1.25x real-time throughput.
 
 ## Rejected low-preroll cadence pass
 

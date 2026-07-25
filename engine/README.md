@@ -1,6 +1,6 @@
 # TTS engine
 
-`engine/` contains the production C++17 Qwen3-TTS implementation. It owns GGUF loading, text tokenization, speaker embedding extraction, autoregressive codec generation, vocoder decode, streaming callbacks and hints, WAV I/O, the C/C++ APIs, JNI bridge, engine CLI, and quantizer.
+`engine/` contains the production C++17 Qwen3-TTS implementation. It owns GGUF loading, text tokenization, speaker embedding extraction, autoregressive codec generation, vocoder decode, streaming PCM callbacks, WAV I/O, the C++ API, engine CLI, and quantizer.
 
 Build from the repository root so the engine and streaming wrapper share one GGML configuration:
 
@@ -13,7 +13,7 @@ Or build the full workspace targets directly:
 
 ```powershell
 cmake --build build-ninja-cuda --target `
-  tts_engine_cli qwen3_streaming_cli tts_engine_quantize
+  tts_engine_cli qwen3_tts_streaming qwen3_streaming_cli tts_engine_quantize
 ```
 
 Run the engine CLI from the repository root:
@@ -30,10 +30,9 @@ The engine defaults to incremental generation/decode. Use `--batch` for a single
 
 Public headers:
 
-- `src/qwen3_tts.h`: C++ pipeline API and streaming hint types.
-- `src/qwen3_tts_c.h`: C ABI.
+- `src/qwen3_tts.h`: C++ pipeline and streaming callback API.
 - `src/tts_transformer.h`: transformer internals used by the pipeline.
 - `src/audio_tokenizer_encoder.h`: speaker encoder.
 - `src/audio_tokenizer_decoder.h`: codec decoder/vocoder.
 
-The repository intentionally has no separate component-test layer. Validation uses production target builds plus short model-backed batch and streaming smoke synthesis.
+The default CTest layer contains fast wrapper contract checks. Model-backed streaming, fidelity, cadence, and reliability checks are orchestrated by `tools/acceptance.py` from the repository root.

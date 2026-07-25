@@ -1,53 +1,35 @@
 # qwen3-tts-cpp-streaming
 
-Native Qwen3-TTS inference in C++17 with GGML, CUDA acceleration, batch synthesis, incremental vocoder decode, callback-paced PCM, voice cloning, CustomVoice, and VoiceDesign support.
+Native Qwen3-TTS inference in C++17 with GGML and optional CUDA acceleration. The project supports batch synthesis, incremental PCM streaming, voice cloning, CustomVoice, VoiceDesign, and a reusable C++ integration library.
 
-## Repository layout
+## Getting started
 
-```text
-engine/                 Core library, C/C++ APIs, engine CLI, quantizer
-apps/streaming_cli/     Callback-oriented integration harness
-models/                 Local GGUF models (ignored by Git)
-reference/              Reusable speaker embeddings and reference audio
-tools/                  Model conversion and operational quality utilities
-docs/architecture.md    Runtime architecture and streaming semantics
-docs/performance-baseline-0.6b.md
-                        Historical pre-optimization benchmark
-docs/performance-baseline-0.6b-current.md
-                        Accepted current-main benchmark and reproduction
-docs/performance-baseline-0.6b-current.json
-                        Machine-readable current-main scores
-```
+### 1. Install prerequisites
 
-`engine/ggml/` is built as part of the workspace. The streaming CLI links directly to `tts_engine`; it does not launch the engine CLI as a subprocess.
-
-## Requirements
-
-- CMake 3.20+
+- CMake 3.20 or newer
 - A C++17 compiler
 - Visual Studio 2022 with the Desktop C++ workload on Windows
-- Optional CUDA Toolkit for GPU inference
-- Python only for model conversion and workflow tools
+- Ninja and the CUDA Toolkit for the recommended Windows GPU build
+- Python 3 for model preparation and benchmark utilities
 
-## Models
+Run the following commands from a Visual Studio Developer PowerShell in the repository root.
 
-Place GGUF artifacts in `models/`. The common set is:
+### 2. Prepare models
 
-```text
-qwen3-tts-0.6b-f16.gguf
-qwen3-tts-0.6b-q5_k.gguf
-qwen3-tts-0.6b-q4_k.gguf
-qwen3-tts-1.7b-base-f16.gguf
-qwen3-tts-1.7b-customvoice-f16.gguf
-qwen3-tts-1.7b-voicedesign-f16.gguf
-qwen3-tts-tokenizer-f16.gguf
+Place converted GGUF files in `models/`, or prepare the standard model set with:
+
+```powershell
+py -3 tools\setup_pipeline_models.py --models-dir models --coreml off
 ```
 
-`tools/setup_pipeline_models.py` prepares the standard model set. The conversion scripts remain available for manual workflows.
+The minimum 0.6B F16 streaming set is:
 
-## Build
+```text
+models/qwen3-tts-0.6b-f16.gguf
+models/qwen3-tts-tokenizer-f16.gguf
+```
 
-From a Visual Studio Developer PowerShell:
+### 3. Build
 
 ```powershell
 cmake -S . -B build-ninja-cuda -G Ninja `
@@ -58,34 +40,94 @@ cmake -S . -B build-ninja-cuda -G Ninja `
   -DGGML_CUDA_GRAPHS=ON
 
 cmake --build build-ninja-cuda --target `
-  tts_engine_cli qwen3_streaming_cli tts_engine_quantize
+  tts_engine_cli qwen3_tts_streaming qwen3_streaming_cli
 ```
 
-For a Visual Studio generator build, run `tools\build.bat`. The engine-only build helper is `engine\build.ps1`.
+For a Visual Studio generator build, use `tools\build.bat`.
+
+### 4. Synthesize streaming speech
+
+This example uses the committed Priestley 0.6B voice, plays audio as it is generated, and writes the complete WAV:
+
+```powershell
+build-ninja-cuda\apps\streaming_cli\qwen3_streaming_cli.exe `
+  -m models `
+  --model-identifier qwen3-tts-0.6b-f16 `
+  --speaker-embedding reference\priestley_0.6b_f16.json `
+  --tts-profile offgrid-callback `
+  --seed 42 `
+  -t "Hello from Qwen3 TTS." `
+  -o examples\getting_started.wav
+```
+
+Use `--no-play-streaming --simulate-stream-callback` for a silent callback-path run. On Windows, streaming CLI diagnostics go to stdout, so `2>&1` is unnecessary when piping to `Tee-Object`.
+
+## Build options and outputs
+
+`QWEN3_TTS_BUILD_STREAMING_WRAPPER=OFF` omits the integration library and its CLI. `QWEN3_TTS_BUILD_STREAMING_CLI=OFF` builds the library without the harness.
 
 Primary Ninja outputs:
 
 ```text
-build-ninja-cuda\engine\tts_engine_cli.exe
-build-ninja-cuda\apps\streaming_cli\qwen3_streaming_cli.exe
-build-ninja-cuda\engine\tts_engine_quantize.exe
+build-ninja-cuda/engine/tts_engine_cli.exe
+build-ninja-cuda/apps/streaming_cli/qwen3_tts_streaming.lib
+build-ninja-cuda/apps/streaming_cli/qwen3_streaming_cli.exe
+build-ninja-cuda/engine/tts_engine_quantize.exe
 ```
 
-On Windows, keep `build-ninja-cuda\bin` and `build-ninja-cuda\engine` on `PATH`, or place the generated `ggml*.dll` files beside the executable.
+Generated `ggml*.dll` files must be beside the executable or available on `PATH`. The normal build places copies beside the CLIs.
+
+## Streaming integration library
+
+The CMake target `qwen3_tts::streaming` exposes `offgrid_tts/Qwen3StreamingTts.h`:
+
+```cpp
+#include <offgrid_tts/Qwen3StreamingTts.h>
+#include <stdexcept>
+
+Qwen3StreamingTts tts;
+if (!tts.load("models", "qwen3-tts-0.6b-f16")) {
+    throw std::runtime_error(tts.last_error());
+}
+if (!tts.load_speaker_embedding("reference/priestley_0.6b_f16.json")) {
+    throw std::runtime_error(tts.last_error());
+}
+
+TtsStreamOptions options;
+options.output_wav.clear(); // Callback-only; do not write a WAV.
+options.play_streaming = false;
+
+bool ok = tts.synthesize_streaming(
+    "Hello from the integration library.",
+    options,
+    [](const TtsStreamChunk& chunk) {
+        consume_pcm(chunk.samples.data(), chunk.samples.size(), chunk.sample_rate); // Application-provided sink.
+        return true; // Return false to cancel generation.
+    });
+```
+
+The wrapper:
+
+- loads the selected model immediately;
+- is movable but not copyable;
+- supports callback-only or callback-plus-WAV operation;
+- exposes language IDs, named speakers, speaker embeddings, VoiceDesign instructions, sampling, and streaming controls;
+- reports failures through `last_error()` and does not own application playback buffering.
+
+## Streaming profiles
+
+| Profile | Model | Decode policy |
+|---|---|---|
+| `realtime` | 0.6B F16 | 3-frame first window; raw decode callbacks |
+| `memory-saver` | 0.6B Q5_K | Lower-memory quantized model |
+| `ultra-low` | 0.6B Q4_K | Smallest supported quantized model |
+| `offgrid-callback` | Caller-selected | 5-frame first window, two 5-frame ramps, adaptive 7-8-frame steady windows, 240 ms callback chunks, 520 ms target lead |
+
+The engine owns optional Windows `waveOut` playback. Applications consuming PCM callbacks should implement their own device integration and buffering policy.
 
 ## Engine CLI
 
-Base synthesis:
-
-```powershell
-build-ninja-cuda\engine\tts_engine_cli.exe `
-  -m models `
-  --model-name qwen3-tts-0.6b-f16.gguf `
-  -t "Hello from the native engine." `
-  -o examples\engine.wav
-```
-
-Voice cloning from a reusable embedding:
+Use the lower-level engine CLI for batch or direct engine testing:
 
 ```powershell
 build-ninja-cuda\engine\tts_engine_cli.exe `
@@ -93,12 +135,16 @@ build-ninja-cuda\engine\tts_engine_cli.exe `
   --model-name qwen3-tts-0.6b-f16.gguf `
   --speaker-embedding reference\lana_0.6b_f16.json `
   -t "This line uses the stored voice." `
-  -o examples\clone.wav
+  -o examples\engine.wav
 ```
 
-Committed 0.6B clone assets include `lana_0.6b_f16.json`/`lana_ref.wav` and `priestley_0.6b_f16.json`/`priestley_ref.wav` under `reference/`.
+Incremental generation is the default. Add `--batch` for one full vocoder decode.
 
-Extract a new embedding from a clean mono 24 kHz WAV:
+## Voices and VoiceDesign
+
+The `reference/` directory contains 0.6B and 1.7B F16 embeddings for Lana and Priestley, together with their source WAV files. Embeddings are model-family-specific.
+
+Extract an embedding from a clean mono 24 kHz WAV:
 
 ```powershell
 py -3 tools\wav_to_speaker_embedding.py `
@@ -107,94 +153,82 @@ py -3 tools\wav_to_speaker_embedding.py `
   --model-name qwen3-tts-0.6b-f16.gguf
 ```
 
-Add `--batch` for a single full vocoder decode. Streaming generation is the default. Listening-selected sampling defaults are temperature 0.75, top-k 16, residual top-p 0.9, repetition penalty 1.02, and semantic CB0 top-p 1.0. Sampling supports deterministic `--seed` and explicit overrides. A text-relative safety ceiling prevents short prompts from running to the absolute token limit; tune it with `--max-frames-per-text-token` and `--min-dynamic-tokens`.
-
-## Streaming CLI
-
-```powershell
-build-ninja-cuda\apps\streaming_cli\qwen3_streaming_cli.exe `
-  -m models `
-  --model-name qwen3-tts-0.6b-f16 `
-  --speaker-embedding reference\lana_0.6b_f16.json `
-  --tts-profile offgrid-callback `
-  --no-play-streaming `
-  --simulate-stream-callback `
-  -t "Hello from the callback path." `
-  -o examples\stream.wav
-```
-
-Profiles:
-
-| Profile | Model selection | First window | PCM delivery |
-|---|---|---:|---|
-| `realtime` | 0.6B F16 | 3 frames | raw decode windows |
-| `memory-saver` | 0.6B Q5_K | 3 frames | raw decode windows |
-| `ultra-low` | 0.6B Q4_K | 3 frames | raw decode windows |
-| `offgrid-callback` | caller-selected | 5 frames | two 5-frame ramp windows, then adaptive 7-8-frame windows with 2-frame context; 350 ms callback preroll, 520 ms steady lead |
-
-The default streaming policy uses 3/6/8-frame first/ramp/steady windows, 2 frames of left context, 1 early-context frame for the first two windows, 3 final-context frames, asynchronous decode, adaptive windows off, and paced delivery off.
-
-On Windows, `qwen3_streaming_cli.exe` writes diagnostics to stdout. Pipe it directly to `Tee-Object`; `2>&1` is unnecessary.
-
-## VoiceDesign and reusable voices
-
-VoiceDesign requires a VoiceDesign model and non-empty instruction. It rejects speaker embeddings.
+VoiceDesign requires a VoiceDesign model and a non-empty instruction; it does not accept a speaker embedding:
 
 ```powershell
 build-ninja-cuda\apps\streaming_cli\qwen3_streaming_cli.exe `
   -m models `
   --voice-design `
-  --model-name qwen3-tts-1.7b-voicedesign-f16 `
+  --model-identifier qwen3-tts-1.7b-voicedesign-f16 `
   --voice-design-instruct "A calm, deep male narrator." `
   -t "I was not expecting visitors this late." `
   -o examples\voice_design.wav
 ```
 
-For a fixed reusable persona:
+## Sampling and reliability
 
-1. Generate clean reference audio with `tools/voicedesign_to_wav.py`.
-2. Extract a model-family-specific embedding with `tools/wav_to_speaker_embedding.py`.
-3. Validate it with `tools/speaker_embedding_smoke_test.py`.
+Listening-selected defaults are temperature 0.75, top-k 16, residual top-p 0.9, repetition penalty 1.02, and semantic CB0 top-p 1.0. A text-relative safety ceiling prevents runaway generation when EOS is not sampled. Use `--seed` for deterministic output.
 
-Instruction token caching is available through `--cache-instruction-tokens` and `--instruction-cache-key`. A cache key must represent the exact instruction text; reusing a key with different text intentionally reuses the earlier tokens.
+Useful validation commands:
 
-## Streaming hint track
+```powershell
+py -3 tools\streaming_callback_benchmark.py `
+  --input-json reference\lana_0.6b_f16.json `
+  --seed 42 `
+  --text "Use a reasonably long paragraph for this consistency test."
 
-The C++ API and wrapper can emit a header followed by per-audio-chunk hints. Hints contain exact sample ranges, contributing codec-frame ranges, RMS/peak/zero-crossing evidence, activity spans, and an experimental monotonic text-progress estimate.
+py -3 tools\streaming_regression_benchmark.py `
+  --input-json reference\lana_0.6b_f16.json `
+  --seeds 40,41,42,43,44,45
+```
 
-The hint track is not word, phoneme, viseme, or forced alignment. Sample end positions are exclusive. Downstream timing systems should treat activity and text progress as soft evidence.
+The regression command accepts natural EOS and the bounded text-relative safety limit. It fails on process errors, timeouts, or the absolute token limit.
 
-See [docs/architecture.md](docs/architecture.md) for the execution flow and concurrency model.
+## Tests
 
-See [docs/performance-baseline-0.6b.md](docs/performance-baseline-0.6b.md) for the initial 0.6B CUDA performance baseline, fidelity limitations, and optimization roadmap.
+The default CTest suite is model-free and checks wrapper ownership, moves, initial state, and error reporting:
 
-See [docs/performance-baseline-0.6b-current.md](docs/performance-baseline-0.6b-current.md) for the authoritative current-main performance, fidelity, cadence, and reproduction baseline.
+```powershell
+cmake --build build-ninja-cuda --target qwen3_wrapper_contract_test
+ctest --test-dir build-ninja-cuda -L fast --output-on-failure
+```
 
-See [docs/optimization-results-0.6b.md](docs/optimization-results-0.6b.md) for measured results from the first optimization pass.
+The acceptance runner uses the real 0.6B model and stored voice. Quick mode checks wrapper streaming contracts, callback/WAV equivalence, cancellation, deterministic output, initialization and streaming budgets, PCM integrity, artifact scores, and one reliability case:
 
-## Retained tools
+```powershell
+cmake --build build-ninja-cuda --target `
+  qwen3_wrapper_contract_test qwen3_wrapper_model_test qwen3_streaming_cli
 
-| Tool | Purpose |
-|---|---|
-| `setup_pipeline_models.py` | Prepare the standard GGUF model set |
-| `convert_tts_to_gguf.py` | Convert a Qwen3-TTS model |
-| `convert_tokenizer_to_gguf.py` | Convert tokenizer/vocoder assets |
-| `convert_code_predictor_to_coreml.py` | Export the optional CoreML predictor |
-| `voicedesign_to_wav.py` | Produce segmented or candidate-selected reference audio |
-| `wav_to_speaker_embedding.py` | Extract a reusable speaker embedding |
-| `speaker_embedding_smoke_test.py` | Validate an embedding through synthesis |
-| `streaming_quality_ab.py` | Compare batch and streaming output |
-| `streaming_callback_benchmark.py` | Measure callback startup and cadence |
-| `streaming_regression_benchmark.py` | Run a deterministic reliability/performance corpus |
-| `detect_synthetic_spans.py` | Heuristic artifact scoring for WAV files |
+py -3 tools\acceptance.py
+```
 
-Generated WAVs, reports, caches, models, and temporary run directories are ignored by Git.
+Run `py -3 tools\acceptance.py --full` for the six-case, six-seed reliability corpus. Model-backed checks are not registered with CTest by default; configure with `-DQWEN3_TTS_ENABLE_MODEL_TESTS=ON` when that behavior is desirable for a dedicated machine.
 
 ## Runtime controls
 
-- `QWEN3_TTS_LOW_MEM=1`: lazily load and unload large components to reduce residency.
-- `QWEN3_TTS_PRIME_RUNTIME=full`: also prime the steady vocoder shape; `0` disables all runtime priming.
-- `QWEN3_TTS_GGML_DEBUG=1`: include GGML debug logging.
-- `QWEN3_TTS_USE_COREML=1`: enable the CoreML code predictor on supported macOS builds.
+- `QWEN3_TTS_LOW_MEM=1`: lazily load and unload large components.
+- `QWEN3_TTS_PRIME_RUNTIME=full`: prime the steady vocoder shape; `0` disables priming.
+- `QWEN3_TTS_GGML_DEBUG=1`: enable GGML debug logging.
+- `QWEN3_TTS_USE_COREML=1`: enable CoreML prediction on supported macOS builds.
+- `QWEN3_TTS_PROFILE_DECODER=1`: print detailed vocoder profiling.
+- `QWEN3_TTS_DEBUG_DUMP_DIR=<path>`: write transformer parity traces.
+
+## Repository map
+
+```text
+engine/                 Core C++ library, engine CLI, quantizer
+apps/streaming_cli/     Reusable streaming wrapper and CLI harness
+models/                 Local GGUF models; ignored by Git
+reference/              Reusable voices and source audio
+tools/                  Model preparation and validation utilities
+docs/                   Architecture and measured performance records
+```
+
+Further reading:
+
+- [Architecture](docs/architecture.md)
+- [Current 0.6B baseline](docs/performance-baseline-0.6b-current.md)
+- [Optimization results](docs/optimization-results-0.6b.md)
+- [Historical baseline](docs/performance-baseline-0.6b.md)
 
 Use each CLI's `--help` output as the authoritative option reference.

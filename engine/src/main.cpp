@@ -514,7 +514,6 @@ int main(int argc, char ** argv) {
     // Print timing
     if (params.print_timing) {
         fprintf(stderr, "\nTiming:\n");
-        fprintf(stderr, "  Load:      %6lld ms\n", (long long)result.t_load_ms);
         fprintf(stderr, "  Tokenize:  %6lld ms\n", (long long)result.t_tokenize_ms);
         fprintf(stderr, "  Encode:    %6lld ms\n", (long long)result.t_encode_ms);
         fprintf(stderr, "  Generate:  %6lld ms\n", (long long)result.t_generate_ms);

@@ -138,75 +138,8 @@ bool Qwen3TTS::load_models(const std::string & model_dir, const std::string & mo
     const bool prime_runtime = !prime_runtime_env || prime_runtime_env[0] == '\0' || prime_runtime_env[0] != '0';
     const bool prime_steady_runtime = prime_runtime_env && std::string(prime_runtime_env) == "full";
     if (prime_runtime && transformer_loaded_ && decoder_loaded_) {
-        auto prime_streaming_runtime = [&]() -> bool {
-            std::vector<int32_t> text_tokens = tokenizer_.encode_for_tts("Hello.");
-            if (text_tokens.empty()) {
-                return false;
-            }
-
-            std::vector<int32_t> instruct_tokens;
-            const auto & tcfg = transformer_.get_config();
-            if (tcfg.tts_model_type == "voice_design") {
-                instruct_tokens = tokenizer_.encode_instruct("A calm, natural speaking voice.");
-                if (instruct_tokens.empty()) {
-                    return false;
-                }
-            }
-
-            std::vector<int32_t> warm_codes;
-            transformer_.clear_kv_cache();
-            const int64_t t_prime_transformer = get_time_ms();
-            if (!transformer_.generate_streaming(text_tokens.data(),
-                                                (int32_t) text_tokens.size(),
-                                                nullptr,
-                                                4,
-                                                warm_codes,
-                                                nullptr,
-                                                2050,
-                                                1.05f,
-                                                0.9f,
-                                                75,
-                                                1.0f,
-                                                1.0f,
-                                                instruct_tokens.empty() ? nullptr : instruct_tokens.data(),
-                                                (int32_t) instruct_tokens.size(),
-                                                nullptr)) {
-                return false;
-            }
-            const int64_t transformer_prime_ms = get_time_ms() - t_prime_transformer;
-
-            const int32_t n_codebooks = std::max<int32_t>(1, audio_decoder_.get_config().n_codebooks);
-            int32_t warm_frames = (int32_t) (warm_codes.size() / (size_t) n_codebooks);
-            if (warm_frames < 3) {
-                warm_frames = 3;
-                warm_codes.assign((size_t) warm_frames * (size_t) n_codebooks, 0);
-            }
-
-            std::vector<float> scratch_audio;
-            const int64_t t_prime_first_decode = get_time_ms();
-            if (!audio_decoder_.decode(warm_codes.data(), warm_frames, scratch_audio)) {
-                return false;
-            }
-            const int64_t first_decode_prime_ms = get_time_ms() - t_prime_first_decode;
-
-            int64_t steady_decode_prime_ms = 0;
-            if (prime_steady_runtime) {
-                std::vector<int32_t> steady_zero_codes((size_t) 8 * (size_t) n_codebooks, 0);
-                const int64_t t_prime_steady_decode = get_time_ms();
-                if (!audio_decoder_.decode(steady_zero_codes.data(), 8, scratch_audio)) {
-                    return false;
-                }
-                steady_decode_prime_ms = get_time_ms() - t_prime_steady_decode;
-            }
-            fprintf(stderr, "    Prime stages: transformer=%lld ms first-vocoder=%lld ms steady-vocoder=%lld ms\n",
-                    (long long) transformer_prime_ms,
-                    (long long) first_decode_prime_ms,
-                    (long long) steady_decode_prime_ms);
-            return true;
-        };
-
         const int64_t t_runtime_prime_start = get_time_ms();
-        if (!prime_streaming_runtime()) {
+        if (!prime_streaming_runtime(prime_steady_runtime, true)) {
             error_msg_ = "Failed to prime streaming runtime: " +
                 (!audio_decoder_.get_error().empty() ? audio_decoder_.get_error() : transformer_.get_error());
             return false;
@@ -219,6 +152,86 @@ bool Qwen3TTS::load_models(const std::string & model_dir, const std::string & mo
     fprintf(stderr, "All models loaded in %lld ms\n", (long long) (t_end - t_start));
     log_memory_usage("load/end");
 
+    return true;
+}
+
+bool Qwen3TTS::prime_streaming_runtime(bool include_steady_decode, bool print_timing) {
+    if (!models_loaded_ || !transformer_loaded_ || !decoder_loaded_) {
+        error_msg_ = "Models are not loaded for runtime priming";
+        return false;
+    }
+
+    std::vector<int32_t> text_tokens = tokenizer_.encode_for_tts("Hello.");
+    if (text_tokens.empty()) {
+        error_msg_ = "Failed to tokenize runtime prime text";
+        return false;
+    }
+
+    std::vector<int32_t> instruct_tokens;
+    const auto & tcfg = transformer_.get_config();
+    if (tcfg.tts_model_type == "voice_design") {
+        instruct_tokens = tokenizer_.encode_instruct("A calm, natural speaking voice.");
+        if (instruct_tokens.empty()) {
+            error_msg_ = "Failed to tokenize runtime prime instruction";
+            return false;
+        }
+    }
+
+    std::vector<int32_t> warm_codes;
+    transformer_.clear_kv_cache();
+    const int64_t t_prime_transformer = get_time_ms();
+    if (!transformer_.generate_streaming(text_tokens.data(),
+                                         (int32_t) text_tokens.size(),
+                                         nullptr,
+                                         4,
+                                         warm_codes,
+                                         nullptr,
+                                         2050,
+                                         1.05f,
+                                         0.9f,
+                                         75,
+                                         1.0f,
+                                         1.0f,
+                                         instruct_tokens.empty() ? nullptr : instruct_tokens.data(),
+                                         (int32_t) instruct_tokens.size(),
+                                         nullptr)) {
+        error_msg_ = "Transformer runtime prime failed: " + transformer_.get_error();
+        return false;
+    }
+    const int64_t transformer_prime_ms = get_time_ms() - t_prime_transformer;
+
+    const int32_t n_codebooks = std::max<int32_t>(1, audio_decoder_.get_config().n_codebooks);
+    int32_t warm_frames = (int32_t) (warm_codes.size() / (size_t) n_codebooks);
+    if (warm_frames < 3) {
+        warm_frames = 3;
+        warm_codes.assign((size_t) warm_frames * (size_t) n_codebooks, 0);
+    }
+
+    std::vector<float> scratch_audio;
+    const int64_t t_prime_first_decode = get_time_ms();
+    if (!audio_decoder_.decode(warm_codes.data(), warm_frames, scratch_audio)) {
+        error_msg_ = "Vocoder runtime prime failed: " + audio_decoder_.get_error();
+        return false;
+    }
+    const int64_t first_decode_prime_ms = get_time_ms() - t_prime_first_decode;
+
+    int64_t steady_decode_prime_ms = 0;
+    if (include_steady_decode) {
+        std::vector<int32_t> steady_zero_codes((size_t) 8 * (size_t) n_codebooks, 0);
+        const int64_t t_prime_steady_decode = get_time_ms();
+        if (!audio_decoder_.decode(steady_zero_codes.data(), 8, scratch_audio)) {
+            error_msg_ = "Steady vocoder runtime prime failed: " + audio_decoder_.get_error();
+            return false;
+        }
+        steady_decode_prime_ms = get_time_ms() - t_prime_steady_decode;
+    }
+
+    if (print_timing) {
+        fprintf(stderr, "    Prime stages: transformer=%lld ms first-vocoder=%lld ms steady-vocoder=%lld ms\n",
+                (long long) transformer_prime_ms,
+                (long long) first_decode_prime_ms,
+                (long long) steady_decode_prime_ms);
+    }
     return true;
 }
 

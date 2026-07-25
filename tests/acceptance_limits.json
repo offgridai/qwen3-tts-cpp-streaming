@@ -1,0 +1,11 @@
+{
+  "cold_model_load_ms_max": 1550,
+  "cold_first_350_ms_max": 1900,
+  "resident_first_350_ms_max": 400,
+  "max_callback_gap_ms_max": 460,
+  "rtf_max": 0.9,
+  "minimum_playback_headroom_ms_min": 15,
+  "simulated_playback_underruns_max": 0,
+  "worst_half_second_score_max": 1.25,
+  "worst_region_score_max": 3.5
+}

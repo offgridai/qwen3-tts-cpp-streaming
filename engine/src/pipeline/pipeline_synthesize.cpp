@@ -1,6 +1,5 @@
 #include "qwen3_tts.h"
 #include "pipeline/pipeline_internal.h"
-#include "transformer/transformer_internal.h"
 
 #include <algorithm>
 #include <atomic>
@@ -67,13 +66,6 @@ double qwen3_samples_to_ms(size_t n_samples, int32_t sample_rate) {
     return 1000.0 * (double) n_samples / (double) sample_rate;
 }
 
-double qwen3_samples_to_sec(size_t n_samples, int32_t sample_rate) {
-    if (sample_rate <= 0) {
-        return 0.0;
-    }
-    return (double) n_samples / (double) sample_rate;
-}
-
 int32_t clamp_window_frames(int32_t value, int32_t min_value, int32_t max_value) {
     if (max_value < min_value) {
         return min_value;
@@ -81,284 +73,26 @@ int32_t clamp_window_frames(int32_t value, int32_t min_value, int32_t max_value)
     return std::max(min_value, std::min(value, max_value));
 }
 
-tts_hint_energy_class classify_hint_energy(float rms_energy, float peak_energy, float zero_crossing_rate) {
-    if (peak_energy < 0.015f && rms_energy < 0.008f) {
-        return tts_hint_energy_class::silence;
-    }
-    if (peak_energy > 0.92f || (peak_energy > 0.75f && rms_energy < 0.18f && zero_crossing_rate < 0.08f)) {
-        return tts_hint_energy_class::burst_like;
-    }
-    if (rms_energy >= 0.02f || peak_energy >= 0.08f) {
-        return tts_hint_energy_class::speech_like;
-    }
-    return tts_hint_energy_class::unknown;
-}
-
-tts_hint_activity_class classify_hint_activity(float rms_energy, float peak_energy, float zero_crossing_rate) {
-    switch (classify_hint_energy(rms_energy, peak_energy, zero_crossing_rate)) {
-    case tts_hint_energy_class::silence:
-        return tts_hint_activity_class::silence;
-    case tts_hint_energy_class::speech_like:
-        return tts_hint_activity_class::speech_like;
-    case tts_hint_energy_class::burst_like:
-        return tts_hint_activity_class::burst_like;
-    case tts_hint_energy_class::unknown:
-    default:
-        return tts_hint_activity_class::unknown;
-    }
-}
-
-float classify_hint_activity_confidence(tts_hint_activity_class activity_class,
-                                        float rms_energy,
-                                        float peak_energy,
-                                        float zero_crossing_rate) {
-    switch (activity_class) {
-    case tts_hint_activity_class::silence: {
-        const float quiet_peak = std::clamp((0.015f - peak_energy) / 0.015f, 0.0f, 1.0f);
-        const float quiet_rms = std::clamp((0.008f - rms_energy) / 0.008f, 0.0f, 1.0f);
-        return 0.35f + 0.65f * std::max(quiet_peak, quiet_rms);
-    }
-    case tts_hint_activity_class::speech_like: {
-        const float speech_rms = std::clamp((rms_energy - 0.02f) / 0.08f, 0.0f, 1.0f);
-        const float speech_peak = std::clamp((peak_energy - 0.08f) / 0.20f, 0.0f, 1.0f);
-        const float zcr_ok = 1.0f - std::clamp(std::fabs(zero_crossing_rate - 0.12f) / 0.20f, 0.0f, 1.0f);
-        return 0.25f + 0.75f * std::max(std::max(speech_rms, speech_peak), zcr_ok * 0.6f);
-    }
-    case tts_hint_activity_class::burst_like: {
-        const float burst_peak = std::clamp((peak_energy - 0.75f) / 0.25f, 0.0f, 1.0f);
-        const float transient_rms = 1.0f - std::clamp((rms_energy - 0.18f) / 0.20f, 0.0f, 1.0f);
-        return 0.30f + 0.70f * std::max(burst_peak, transient_rms);
-    }
-    case tts_hint_activity_class::unknown:
-    default:
-        return 0.15f;
-    }
-}
-
-void append_activity_span(std::vector<tts_stream_activity_span> & spans,
-                          tts_hint_activity_class activity_class,
-                          int64_t audio_sample_start,
-                          int64_t audio_sample_end,
-                          int32_t sample_rate,
-                          float confidence) {
-    if (audio_sample_end <= audio_sample_start) {
-        return;
-    }
-
-    tts_stream_activity_span span;
-    span.audio_sample_start = audio_sample_start;
-    span.audio_sample_end = audio_sample_end;
-    span.audio_start_sec = qwen3_samples_to_sec((size_t) std::max<int64_t>(0, audio_sample_start), sample_rate);
-    span.audio_end_sec = qwen3_samples_to_sec((size_t) std::max<int64_t>(0, audio_sample_end), sample_rate);
-    span.activity_class = activity_class;
-    span.confidence = confidence;
-    spans.push_back(span);
-}
-
-std::vector<tts_stream_activity_span> build_activity_spans(const float * samples,
-                                                           size_t count,
-                                                           int32_t sample_rate,
-                                                           int64_t audio_sample_start,
-                                                           bool * has_speech_out,
-                                                           float * speech_occupancy_out) {
-    std::vector<tts_stream_activity_span> spans;
-    if (has_speech_out) {
-        *has_speech_out = false;
-    }
-    if (speech_occupancy_out) {
-        *speech_occupancy_out = 0.0f;
-    }
-    if (!samples || count == 0 || sample_rate <= 0) {
-        return spans;
-    }
-
-    const size_t microframe_samples = std::max<size_t>(1, (size_t) sample_rate / 100);
-    size_t speech_samples = 0;
-    size_t processed = 0;
-    tts_hint_activity_class current_class = tts_hint_activity_class::unknown;
-    float current_confidence = 0.0f;
-    int64_t current_span_start = audio_sample_start;
-    bool have_current = false;
-
-    while (processed < count) {
-        const size_t frame_start = processed;
-        const size_t frame_count = std::min(microframe_samples, count - frame_start);
-
-        double sum_sq = 0.0;
-        float peak = 0.0f;
-        int64_t zero_crossings = 0;
-        float prev = samples[frame_start];
-        for (size_t i = 0; i < frame_count; ++i) {
-            const float sample = samples[frame_start + i];
-            const float abs_sample = std::fabs(sample);
-            if (abs_sample > peak) {
-                peak = abs_sample;
-            }
-            sum_sq += (double) sample * (double) sample;
-            if (i > 0) {
-                const bool prev_nonneg = prev >= 0.0f;
-                const bool curr_nonneg = sample >= 0.0f;
-                if (prev_nonneg != curr_nonneg) {
-                    ++zero_crossings;
-                }
-            }
-            prev = sample;
-        }
-
-        const float rms = (float) std::sqrt(sum_sq / (double) frame_count);
-        const float zcr = frame_count > 1 ? (float) ((double) zero_crossings / (double) (frame_count - 1)) : 0.0f;
-        const tts_hint_activity_class frame_class = classify_hint_activity(rms, peak, zcr);
-        const float frame_confidence = classify_hint_activity_confidence(frame_class, rms, peak, zcr);
-        const int64_t frame_audio_start = audio_sample_start + (int64_t) frame_start;
-        const int64_t frame_audio_end = frame_audio_start + (int64_t) frame_count;
-
-        if (frame_class == tts_hint_activity_class::speech_like) {
-            speech_samples += frame_count;
-            if (has_speech_out) {
-                *has_speech_out = true;
-            }
-        }
-
-        if (!have_current) {
-            current_class = frame_class;
-            current_confidence = frame_confidence;
-            current_span_start = frame_audio_start;
-            have_current = true;
-        } else if (frame_class != current_class) {
-            append_activity_span(spans, current_class, current_span_start, frame_audio_start, sample_rate, current_confidence);
-            current_class = frame_class;
-            current_confidence = frame_confidence;
-            current_span_start = frame_audio_start;
-        } else {
-            current_confidence = std::max(current_confidence, frame_confidence);
-        }
-
-        processed += frame_count;
-        if (processed >= count) {
-            append_activity_span(spans, current_class, current_span_start, frame_audio_end, sample_rate, current_confidence);
-        }
-    }
-
-    if (speech_occupancy_out) {
-        *speech_occupancy_out = count > 0 ? (float) ((double) speech_samples / (double) count) : 0.0f;
-    }
-    return spans;
-}
-
-struct frame_text_progress_estimate {
-    double progress = 0.0;
-    int32_t token_index_estimate = -1;
-    float confidence = 0.0f;
-};
-
-struct chunk_text_progress_estimate {
-    frame_text_progress_estimate start;
-    frame_text_progress_estimate end;
-    double mean_confidence = 0.0;
-};
-
-tts_stream_hint_chunk build_hint_chunk(const float * samples,
-                                       size_t count,
-                                       int32_t sample_rate,
-                                       int32_t chunk_index,
-                                       int32_t codec_frame_start,
-                                       int32_t codec_frame_end,
-                                       int64_t audio_sample_start,
-                                       int32_t text_token_count,
-                                       const chunk_text_progress_estimate * text_progress_estimate,
-                                       bool is_paced_chunk,
-                                       bool is_final) {
-    tts_stream_hint_chunk hint;
-    hint.chunk_index = chunk_index;
-    hint.codec_frame_start = codec_frame_start;
-    hint.codec_frame_end = codec_frame_end;
-    hint.audio_sample_start = audio_sample_start;
-    hint.audio_sample_end = audio_sample_start + (int64_t) count;
-    hint.audio_start_sec = qwen3_samples_to_sec((size_t) std::max<int64_t>(0, audio_sample_start), sample_rate);
-    hint.audio_end_sec = qwen3_samples_to_sec((size_t) std::max<int64_t>(0, hint.audio_sample_end), sample_rate);
-    hint.is_paced_chunk = is_paced_chunk;
-    hint.is_final = is_final;
-    hint.is_text_progress_experimental = text_progress_estimate != nullptr;
-    if (text_progress_estimate) {
-        hint.text_progress_start = text_progress_estimate->start.progress;
-        hint.text_progress_end = text_progress_estimate->end.progress;
-        hint.text_progress = hint.text_progress_end;
-        hint.text_token_index_start_estimate = text_progress_estimate->start.token_index_estimate;
-        hint.text_token_index_end_estimate = text_progress_estimate->end.token_index_estimate;
-        hint.text_token_index_estimate = hint.text_token_index_end_estimate;
-        hint.text_progress_confidence = (float) text_progress_estimate->mean_confidence;
-    }
-    if (is_final && text_token_count > 0 && text_progress_estimate) {
-        // Stream completion is authoritative even when the experimental per-frame
-        // estimator is still lagging behind on the final emitted chunk.
-        hint.text_progress_start = std::min(hint.text_progress_start, 1.0);
-        hint.text_progress_end = 1.0;
-        hint.text_progress = 1.0;
-        hint.text_token_index_start_estimate = std::max(0, hint.text_token_index_start_estimate);
-        hint.text_token_index_end_estimate = text_token_count - 1;
-        hint.text_token_index_estimate = text_token_count - 1;
-        hint.text_progress_confidence = 1.0f;
-    }
-
-    if (!samples || count == 0) {
-        hint.energy_class = tts_hint_energy_class::unknown;
-        return hint;
-    }
-
-    hint.activity_spans = build_activity_spans(
-        samples,
-        count,
-        sample_rate,
-        audio_sample_start,
-        &hint.has_speech,
-        &hint.speech_occupancy);
-
-    double sum_sq = 0.0;
-    float peak = 0.0f;
-    int64_t zero_crossings = 0;
-    float prev = samples[0];
-    for (size_t i = 0; i < count; ++i) {
-        const float sample = samples[i];
-        const float abs_sample = std::fabs(sample);
-        if (abs_sample > peak) {
-            peak = abs_sample;
-        }
-        sum_sq += (double) sample * (double) sample;
-        if (i > 0) {
-            const bool prev_nonneg = prev >= 0.0f;
-            const bool curr_nonneg = sample >= 0.0f;
-            if (prev_nonneg != curr_nonneg) {
-                ++zero_crossings;
-            }
-        }
-        prev = sample;
-    }
-
-    hint.rms_energy = (float) std::sqrt(sum_sq / (double) count);
-    hint.peak_energy = peak;
-    hint.zero_crossing_rate = count > 1 ? (float) ((double) zero_crossings / (double) (count - 1)) : 0.0f;
-    hint.energy_class = classify_hint_energy(hint.rms_energy, hint.peak_energy, hint.zero_crossing_rate);
-    return hint;
-}
-
+} // namespace
 
 class StreamingAudioPlayer {
 public:
     StreamingAudioPlayer() = default;
     ~StreamingAudioPlayer() { close(); }
 
-    bool open(int32_t sample_rate, int64_t stream_start_ms, int32_t live_preroll_ms = 0) {
+    bool prepare(int32_t sample_rate) {
 #ifdef _WIN32
-        close();
-        stream_start_ms_ = stream_start_ms;
-        sample_rate_ = sample_rate;
-        preroll_samples_ = live_preroll_ms > 0 ? (size_t) (((int64_t) sample_rate * live_preroll_ms) / 1000) : 0;
-        startup_min_samples_ = preroll_samples_ > 0 ? std::max(preroll_samples_, preroll_samples_ * 2) : 0;
-        playback_started_ = preroll_samples_ == 0;
-        starvation_active_ = false;
-        preroll_buffer_.clear();
-        submitted_samples_total_.store(0);
-        if (sample_rate <= 0) { last_error_ = "invalid sample rate"; return false; }
+        if (sample_rate <= 0) {
+            last_error_ = "invalid sample rate";
+            return false;
+        }
+        if (wave_out_ && sample_rate_ == sample_rate) {
+            return true;
+        }
+        if (wave_out_) {
+            close();
+        }
+
         WAVEFORMATEX fmt{};
         fmt.wFormatTag = WAVE_FORMAT_PCM;
         fmt.nChannels = 1;
@@ -372,6 +106,30 @@ public:
             wave_out_ = nullptr;
             return false;
         }
+        sample_rate_ = sample_rate;
+        last_error_.clear();
+        return true;
+#else
+        (void) sample_rate;
+        last_error_ = "live streaming playback is only implemented on Windows";
+        return false;
+#endif
+    }
+
+    bool open(int32_t sample_rate, int64_t stream_start_ms, int32_t live_preroll_ms = 0) {
+#ifdef _WIN32
+        if (worker_.joinable()) {
+            last_error_ = "previous playback stream is still active";
+            return false;
+        }
+        if (!prepare(sample_rate)) { return false; }
+        stream_start_ms_ = stream_start_ms;
+        preroll_samples_ = live_preroll_ms > 0 ? (size_t) (((int64_t) sample_rate * live_preroll_ms) / 1000) : 0;
+        startup_min_samples_ = preroll_samples_ > 0 ? std::max(preroll_samples_, preroll_samples_ * 2) : 0;
+        playback_started_ = preroll_samples_ == 0;
+        starvation_active_ = false;
+        preroll_buffer_.clear();
+        submitted_samples_total_.store(0);
         stopping_ = false;
         worker_ = std::thread([this]() { worker_loop(); });
         return true;
@@ -642,7 +400,25 @@ private:
     std::string last_error_;
 };
 
+namespace {
+
 } // namespace
+
+bool Qwen3TTS::prepare_streaming_playback() {
+    if (!models_loaded_ || !decoder_loaded_) {
+        error_msg_ = "Vocoder is not loaded for streaming playback";
+        return false;
+    }
+    if (!live_player_) {
+        live_player_ = std::make_shared<StreamingAudioPlayer>();
+    }
+    if (!live_player_->prepare(audio_decoder_.get_config().sample_rate)) {
+        error_msg_ = live_player_->last_error();
+        live_player_.reset();
+        return false;
+    }
+    return true;
+}
 
 tts_result Qwen3TTS::synthesize(const std::string & text,
                                 const tts_params & params) {
@@ -1005,30 +781,6 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
     }
     self.transformer_.clear_kv_cache();
 
-    std::vector<float> text_content_proj;
-    std::vector<float> text_content_proj_norms;
-    if (text_content_token_count > 0) {
-        if (!transformer_internal::ops::project_text_tokens(
-                self.transformer_,
-                text_tokens.data() + text_prefix_token_count,
-                text_content_token_count,
-                text_content_proj)) {
-            result.error_msg = "Failed to project text content tokens: " + self.transformer_.get_error();
-            return result;
-        }
-        const int32_t hidden_size = self.transformer_.get_config().hidden_size;
-        text_content_proj_norms.resize((size_t) text_content_token_count, 1.0f);
-        for (int32_t token_index = 0; token_index < text_content_token_count; ++token_index) {
-            const float * row = text_content_proj.data() + (size_t) token_index * hidden_size;
-            double sum_sq = 0.0;
-            for (int32_t h = 0; h < hidden_size; ++h) {
-                sum_sq += (double) row[h] * (double) row[h];
-            }
-            const float norm = (float) std::sqrt(std::max(1e-12, sum_sq));
-            text_content_proj_norms[(size_t) token_index] = norm;
-        }
-    }
-
     std::vector<int32_t> speech_codes;
     int n_codebooks = self.transformer_.get_config().n_codebooks;
     int n_frames = 0;
@@ -1078,17 +830,6 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             adaptive_low_watermark_ms,
             params.adaptive_high_watermark_ms > 0 ? params.adaptive_high_watermark_ms : adaptive_low_watermark_ms);
 
-        if (params.stream_hint_header_callback) {
-            tts_stream_hint_header header;
-            header.sample_rate = sample_rate;
-            header.model_type = self.transformer_.get_config().tts_model_type;
-            header.has_instruction = !params.instruction.empty();
-            header.has_speaker_conditioning = speaker_embedding != nullptr;
-            header.text_token_count = text_content_token_count;
-            header.has_experimental_text_progress = text_content_token_count > 0;
-            params.stream_hint_header_callback(header);
-        }
-
         int32_t last_enqueued_frame = 0;
         int32_t last_completed_frame = 0;
         int32_t next_decode_end = first_window;
@@ -1113,20 +854,18 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
         std::atomic<int64_t> emitted_audio_samples{0};
         std::atomic<int32_t> last_selected_tail_window{steady_window};
         tts_generation_first_frame_profile first_frame_profile{};
-        std::atomic<int32_t> hint_chunk_index{0};
-        std::vector<frame_text_progress_estimate> frame_text_progress;
-        frame_text_progress.reserve((size_t) std::max(1, generation_token_limit));
-        std::mutex frame_text_progress_mutex;
-        double last_text_progress_index = 0.0;
-
-        std::unique_ptr<StreamingAudioPlayer> live_player;
+        std::shared_ptr<StreamingAudioPlayer> live_player;
         if (params.play_streaming) {
-            live_player = std::make_unique<StreamingAudioPlayer>();
+            if (!self.live_player_) {
+                self.live_player_ = std::make_shared<StreamingAudioPlayer>();
+            }
+            live_player = self.live_player_;
             const int32_t player_preroll_ms = (params.paced_audio_delivery && params.paced_live_playback) ? 0 : params.live_preroll_ms;
             if (!live_player->open(sample_rate, t_generate_start, player_preroll_ms)) {
                 fprintf(stderr, "Warning: live streaming playback unavailable: %s\n",
                         live_player->last_error().c_str());
                 live_player.reset();
+                self.live_player_.reset();
             }
         }
         const bool paced_live_playback = params.paced_audio_delivery && params.paced_live_playback && (bool) live_player;
@@ -1158,19 +897,11 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                     steady_split_decode_frames);
         }
 
-        struct HintSampleRange {
-            int64_t audio_sample_start = 0;
-            int64_t audio_sample_end = 0;
-            int32_t codec_frame_start = 0;
-            int32_t codec_frame_end = 0;
-        };
-
         struct PacedDeliveryState {
             std::mutex mutex;
             std::condition_variable cv;
             std::vector<float> buffered;
             size_t emitted_samples = 0;
-            int64_t emitted_audio_sample_start = 0;
             size_t first_emit_samples = 0;
             bool finalized = false;
             bool failed = false;
@@ -1183,163 +914,14 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             int64_t second_emit_gap_ms = -1;
             int64_t max_emit_gap_ms = -1;
             int32_t delivered_chunks = 0;
-            std::vector<HintSampleRange> hint_ranges;
             std::string error_msg;
         } delivery_state;
 
-        auto estimate_latest_frame_text_progress = [&]() -> frame_text_progress_estimate {
-            frame_text_progress_estimate estimate;
-            if (text_content_token_count <= 0 || text_content_proj.empty()) {
-                return estimate;
-            }
-
-            std::vector<float> hidden;
-            if (!self.transformer_.get_hidden_states(hidden) || hidden.empty()) {
-                return estimate;
-            }
-
-            const int32_t hidden_size = self.transformer_.get_config().hidden_size;
-            if ((int32_t) hidden.size() != hidden_size) {
-                return estimate;
-            }
-
-            double hidden_sum_sq = 0.0;
-            for (int32_t h = 0; h < hidden_size; ++h) {
-                hidden_sum_sq += (double) hidden[(size_t) h] * (double) hidden[(size_t) h];
-            }
-            const double hidden_norm = std::sqrt(std::max(1e-12, hidden_sum_sq));
-
-            const int32_t previous_anchor = std::max(0, std::min(text_content_token_count - 1, (int32_t) std::floor(last_text_progress_index)));
-            const int32_t candidate_start = std::max(0, previous_anchor - 2);
-            const int32_t candidate_end = std::min(text_content_token_count - 1, previous_anchor + 8);
-
-            std::vector<double> scores;
-            scores.reserve((size_t) (candidate_end - candidate_start + 1));
-            double max_score = -1e30;
-            for (int32_t token_index = candidate_start; token_index <= candidate_end; ++token_index) {
-                const float * token_row = text_content_proj.data() + (size_t) token_index * hidden_size;
-                double dot = 0.0;
-                for (int32_t h = 0; h < hidden_size; ++h) {
-                    dot += (double) hidden[(size_t) h] * (double) token_row[h];
-                }
-                double cosine = dot / (hidden_norm * (double) text_content_proj_norms[(size_t) token_index]);
-                if (token_index < previous_anchor) {
-                    cosine -= 0.12;
-                }
-                const double forward_distance = (double) std::max(0, token_index - previous_anchor);
-                const double distance_penalty = 0.008 * forward_distance;
-                cosine -= distance_penalty;
-                scores.push_back(cosine);
-                if (cosine > max_score) {
-                    max_score = cosine;
-                }
-            }
-
-            double sum_weight = 0.0;
-            double weighted_index = 0.0;
-            int32_t best_local_index = 0;
-            double best_weight = -1.0;
-            double second_best_weight = -1.0;
-            const double softmax_temperature = 8.0;
-            for (size_t i = 0; i < scores.size(); ++i) {
-                const double weight = std::exp((scores[i] - max_score) * softmax_temperature);
-                sum_weight += weight;
-                weighted_index += weight * (double) (candidate_start + (int32_t) i);
-                if (weight > best_weight) {
-                    second_best_weight = best_weight;
-                    best_weight = weight;
-                    best_local_index = (int32_t) i;
-                } else if (weight > second_best_weight) {
-                    second_best_weight = weight;
-                }
-            }
-
-            if (sum_weight <= 0.0) {
-                return estimate;
-            }
-
-            const double centroid_index = weighted_index / sum_weight;
-            const double peak_prob = best_weight / sum_weight;
-            const double second_prob = second_best_weight > 0.0 ? (second_best_weight / sum_weight) : 0.0;
-            const double confidence = std::clamp(0.15 + 0.85 * (peak_prob - second_prob), 0.0, 1.0);
-            const double direct_index = (double) (candidate_start + best_local_index);
-            const double forward_span = (double) std::max(1, candidate_end - previous_anchor);
-            const double progress_toward_frontier = std::clamp(
-                (centroid_index - last_text_progress_index) / forward_span,
-                0.0,
-                1.0);
-            const double blend = std::clamp(0.35 + 0.40 * confidence + 0.25 * progress_toward_frontier, 0.35, 0.95);
-            const double blended_target =
-                centroid_index * (0.65 + 0.20 * confidence) +
-                direct_index * (0.35 - 0.10 * confidence);
-            const double smoothed_index = std::max(
-                last_text_progress_index,
-                std::min((double) (text_content_token_count - 1),
-                         last_text_progress_index * (1.0 - blend) + blended_target * blend));
-            last_text_progress_index = smoothed_index;
-
-            estimate.progress = text_content_token_count > 1
-                ? std::clamp(smoothed_index / (double) (text_content_token_count - 1), 0.0, 1.0)
-                : 1.0;
-            estimate.token_index_estimate = std::max(0, std::min(text_content_token_count - 1, (int32_t) std::llround(smoothed_index)));
-            estimate.confidence = (float) confidence;
-            (void) best_local_index;
-            return estimate;
-        };
-
-        auto get_chunk_text_progress_estimate = [&](int32_t codec_frame_start, int32_t codec_frame_end) -> chunk_text_progress_estimate {
-            chunk_text_progress_estimate estimate;
-            std::lock_guard<std::mutex> lock(frame_text_progress_mutex);
-            if (frame_text_progress.empty() || codec_frame_end <= 0) {
-                return estimate;
-            }
-            const int32_t start_index = std::max(0, std::min(codec_frame_start, (int32_t) frame_text_progress.size() - 1));
-            const int32_t end_index = std::max(0, std::min(codec_frame_end - 1, (int32_t) frame_text_progress.size() - 1));
-            if (end_index < start_index) {
-                return estimate;
-            }
-
-            double sum_progress = 0.0;
-            double sum_confidence = 0.0;
-            int32_t count = 0;
-            for (int32_t frame_index = start_index; frame_index <= end_index; ++frame_index) {
-                sum_progress += frame_text_progress[(size_t) frame_index].progress;
-                sum_confidence += frame_text_progress[(size_t) frame_index].confidence;
-                ++count;
-            }
-            estimate.start = frame_text_progress[(size_t) start_index];
-            estimate.end = frame_text_progress[(size_t) end_index];
-            if (count > 0) {
-                estimate.mean_confidence = sum_confidence / (double) count;
-                estimate.start.confidence = std::max(estimate.start.confidence, (float) estimate.mean_confidence);
-                estimate.end.confidence = std::max(estimate.end.confidence, (float) estimate.mean_confidence);
-                if (estimate.mean_confidence < 0.45) {
-                    estimate.end.progress = std::max(estimate.end.progress, sum_progress / (double) count);
-                }
-            }
-            estimate.start.progress = std::min(estimate.start.progress, estimate.end.progress);
-            estimate.start.token_index_estimate = std::min(
-                estimate.start.token_index_estimate,
-                estimate.end.token_index_estimate);
-            return estimate;
-        };
-
-        auto emit_hint_chunk = [&](const tts_stream_hint_chunk & hint) -> bool {
-            if (!params.stream_hint_chunk_callback) {
-                return true;
-            }
-            if (!params.stream_hint_chunk_callback(hint)) {
-                delivery_state.error_msg = "Stream hint callback requested stop";
-                delivery_state.failed = true;
-                return false;
-            }
-            return true;
-        };
-
         auto emit_delivery_chunk = [&](const float * chunk,
                                        size_t count,
-                                       const tts_stream_hint_chunk & hint,
+                                       bool is_final,
                                        int64_t wall_ms) -> bool {
+            const int32_t chunk_index = delivery_state.delivered_chunks;
             const double audio_ms = qwen3_samples_to_ms(count, sample_rate);
             const int64_t chunk_gap_ms = delivery_state.previous_emit_wall_ms >= 0
                 ? (wall_ms - delivery_state.previous_emit_wall_ms)
@@ -1354,21 +936,18 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             }
             delivery_state.previous_emit_clock_ms = t_generate_start + wall_ms;
             delivery_state.previous_emit_wall_ms = wall_ms;
-            if (!emit_hint_chunk(hint)) {
-                return false;
-            }
             if (params.audio_chunk_callback) {
                 if (trace_callback_detail) {
                     fprintf(stderr,
                             "[deliver] chunk_index=%d samples=%zu audio_ms=%.1f wall_ms_since_request=%lld wall_ms_since_prev_chunk=%lld final=%s\n",
-                            hint.chunk_index,
+                            chunk_index,
                             count,
                             audio_ms,
                             (long long) wall_ms,
                             (long long) chunk_gap_ms,
-                            hint.is_final ? "yes" : "no");
+                            is_final ? "yes" : "no");
                 }
-                if (!params.audio_chunk_callback(chunk, (int32_t) count, sample_rate, hint.is_final)) {
+                if (!params.audio_chunk_callback(chunk, (int32_t) count, sample_rate, is_final)) {
                     delivery_state.error_msg = "Audio chunk callback requested stop";
                     delivery_state.failed = true;
                     return false;
@@ -1382,7 +961,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                 if (trace_stream_detail) {
                     fprintf(stderr,
                             "[stream] player_write chunk_index=%d samples=%zu audio_ms=%.1f wall_ms_since_request=%lld wall_ms_since_prev_window=%lld cumulative_audio_ms=%.1f player_queued_audio_ms(before)=%.1f paced=yes\n",
-                            hint.chunk_index,
+                            chunk_index,
                             count,
                             audio_ms,
                             (long long) wall_ms,
@@ -1400,7 +979,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                 if (trace_stream_detail) {
                     fprintf(stderr,
                             "[stream] player_queue_after_write chunk_index=%d player_queued_audio_ms=%.1f paced=yes\n",
-                            hint.chunk_index,
+                            chunk_index,
                             live_player->queued_audio_ms());
                 }
             }
@@ -1419,7 +998,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             delivery_thread = std::thread([&]() {
                 for (;;) {
                     std::vector<float> chunk;
-                    tts_stream_hint_chunk hint;
+                    bool is_final = false;
                     int64_t wall_ms = 0;
                     {
                         std::unique_lock<std::mutex> lock(delivery_state.mutex);
@@ -1452,9 +1031,15 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                                     continue;
                                 }
 
+                                // Live playback must receive the preroll that we waited for,
+                                // not merely one normal delivery chunk. Otherwise the audio
+                                // remains stranded in this buffer while the device starts with
+                                // too little headroom.
                                 const size_t startup_emit_target = callback_driven_delivery
                                     ? startup_target_samples
-                                    : delivery_chunk_samples;
+                                    : (paced_live_playback
+                                        ? effective_delivery_start_buffer_samples
+                                        : delivery_chunk_samples);
                                 emit_count = std::min(available, startup_emit_target);
                                 delivery_state.playback_started = true;
                                 delivery_state.first_emit_samples = emit_count;
@@ -1529,6 +1114,15 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                             }
 
                             if (available < delivery_chunk_samples) {
+                                // A large caller-selected delivery chunk must not turn into an
+                                // all-or-nothing live-playback gate. If the device is nearing its
+                                // low-water mark, submit whatever decoded PCM is ready instead of
+                                // withholding it until a complete chunk accumulates.
+                                if (paced_live_playback && live_player &&
+                                    live_player->queued_audio_ms() <= adaptive_low_watermark_ms) {
+                                    emit_count = available;
+                                    break;
+                                }
                                 delivery_state.cv.wait_for(lock, std::chrono::milliseconds(5));
                                 continue;
                             }
@@ -1557,63 +1151,19 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                             continue;
                         }
 
-                        const bool is_final = delivery_state.finalized &&
+                        is_final = delivery_state.finalized &&
                             (delivery_state.emitted_samples + emit_count >= delivery_state.buffered.size());
-                        const int64_t audio_sample_start = delivery_state.emitted_audio_sample_start;
-                        const int64_t audio_sample_end = audio_sample_start + (int64_t) emit_count;
-                        int32_t codec_frame_start = 0;
-                        int32_t codec_frame_end = 0;
-                        bool have_frame_range = false;
-                        while (!delivery_state.hint_ranges.empty() &&
-                               delivery_state.hint_ranges.front().audio_sample_end <= audio_sample_start) {
-                            delivery_state.hint_ranges.erase(delivery_state.hint_ranges.begin());
-                        }
-                        for (const HintSampleRange & range : delivery_state.hint_ranges) {
-                            if (range.audio_sample_start >= audio_sample_end) {
-                                break;
-                            }
-                            if (range.audio_sample_end <= audio_sample_start) {
-                                continue;
-                            }
-                            if (!have_frame_range) {
-                                codec_frame_start = range.codec_frame_start;
-                                codec_frame_end = range.codec_frame_end;
-                                have_frame_range = true;
-                            } else {
-                                codec_frame_start = std::min(codec_frame_start, range.codec_frame_start);
-                                codec_frame_end = std::max(codec_frame_end, range.codec_frame_end);
-                            }
-                        }
 
                         chunk.assign(delivery_state.buffered.begin() + (ptrdiff_t) delivery_state.emitted_samples,
                                      delivery_state.buffered.begin() + (ptrdiff_t) (delivery_state.emitted_samples + emit_count));
                         delivery_state.emitted_samples += emit_count;
-                        delivery_state.emitted_audio_sample_start = audio_sample_end;
-                        while (!delivery_state.hint_ranges.empty() &&
-                               delivery_state.hint_ranges.front().audio_sample_end <= delivery_state.emitted_audio_sample_start) {
-                            delivery_state.hint_ranges.erase(delivery_state.hint_ranges.begin());
-                        }
                         wall_ms = std::max<int64_t>(0, get_time_ms() - t_generate_start);
                         if (delivery_state.first_emit_wall_ms < 0) {
                             delivery_state.first_emit_wall_ms = wall_ms;
                         }
-                        const chunk_text_progress_estimate chunk_text_progress =
-                            get_chunk_text_progress_estimate(codec_frame_start, codec_frame_end);
-                        hint = build_hint_chunk(
-                            chunk.data(),
-                            chunk.size(),
-                            sample_rate,
-                            hint_chunk_index.fetch_add(1),
-                            codec_frame_start,
-                            codec_frame_end,
-                            audio_sample_start,
-                            text_content_token_count,
-                            text_content_token_count > 0 ? &chunk_text_progress : nullptr,
-                            true,
-                            is_final);
                     }
 
-                    if (!emit_delivery_chunk(chunk.data(), chunk.size(), hint, wall_ms)) {
+                    if (!emit_delivery_chunk(chunk.data(), chunk.size(), is_final, wall_ms)) {
                         delivery_state.cv.notify_all();
                         break;
                     }
@@ -1677,7 +1227,6 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                                                  qwen3_decoder_samples_for_frames(dropped_context_frames, sample_rate));
             const size_t appended_samples = decoded.size() - drop_samples;
             const size_t append_offset = result.audio.size();
-            const int64_t appended_audio_sample_start = (int64_t) append_offset;
             result.audio.insert(result.audio.end(), decoded.begin() + (ptrdiff_t) drop_samples, decoded.end());
             const size_t total_samples = result.audio.size();
             emitted_audio_samples.store((int64_t) total_samples);
@@ -1698,35 +1247,10 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                     delivery_state.buffered.insert(delivery_state.buffered.end(),
                                                   decoded.begin() + (ptrdiff_t) drop_samples,
                                                   decoded.end());
-                    HintSampleRange range;
-                    range.audio_sample_start = appended_audio_sample_start;
-                    range.audio_sample_end = appended_audio_sample_start + (int64_t) appended_samples;
-                    range.codec_frame_start = job.new_start;
-                    range.codec_frame_end = job.end_frame;
-                    delivery_state.hint_ranges.push_back(range);
                 }
                 delivery_state.cv.notify_one();
             }
             if (!paced_delivery && appended_samples > 0) {
-                const chunk_text_progress_estimate chunk_text_progress =
-                    get_chunk_text_progress_estimate(job.new_start, job.end_frame);
-                const tts_stream_hint_chunk hint = build_hint_chunk(
-                    result.audio.data() + (ptrdiff_t) append_offset,
-                    appended_samples,
-                    sample_rate,
-                    hint_chunk_index.fetch_add(1),
-                    job.new_start,
-                    job.end_frame,
-                    appended_audio_sample_start,
-                    text_content_token_count,
-                    text_content_token_count > 0 ? &chunk_text_progress : nullptr,
-                    false,
-                    job.is_final);
-                if (params.stream_hint_chunk_callback && !params.stream_hint_chunk_callback(hint)) {
-                    stream_error_msg = "Stream hint callback requested stop";
-                    stream_error.store(true);
-                    return false;
-                }
                 if (params.audio_chunk_callback &&
                     !params.audio_chunk_callback(result.audio.data() + (ptrdiff_t) append_offset,
                                                 (int32_t) appended_samples,
@@ -1756,6 +1280,7 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
                     fprintf(stderr, "Warning: live streaming playback write failed: %s\n",
                             live_player->last_error().c_str());
                     live_player.reset();
+                    self.live_player_.reset();
                 } else {
                     if (trace_stream_detail) {
                         fprintf(stderr,
@@ -1979,12 +1504,6 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             }
             if (!is_final && self.progress_callback_) {
                 self.progress_callback_(frames_available, generation_token_limit);
-            }
-            {
-                std::lock_guard<std::mutex> lock(frame_text_progress_mutex);
-                while ((int32_t) frame_text_progress.size() < frames_available) {
-                    frame_text_progress.push_back(estimate_latest_frame_text_progress());
-                }
             }
             if (is_final) {
                 return enqueue_tail_window(all_codes, frames_available, true);

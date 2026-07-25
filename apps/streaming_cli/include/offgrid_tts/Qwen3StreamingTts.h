@@ -2,81 +2,33 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
-
-enum class TtsHintEnergyClass : uint8_t {
-    unknown = 0,
-    silence = 1,
-    speech_like = 2,
-    burst_like = 3,
-};
-
-enum class TtsHintActivityClass : uint8_t {
-    unknown = 0,
-    silence = 1,
-    speech_like = 2,
-    burst_like = 3,
-};
-
-struct TtsStreamActivitySpan {
-    int64_t audio_sample_start = 0;
-    int64_t audio_sample_end = 0;
-    double audio_start_sec = 0.0;
-    double audio_end_sec = 0.0;
-    TtsHintActivityClass activity_class = TtsHintActivityClass::unknown;
-    float confidence = 0.0f;
-    bool is_experimental = true;
-};
-
-struct TtsStreamHintHeader {
-    int32_t sample_rate = 24000;
-    std::string model_type;
-    bool has_instruction = false;
-    bool has_speaker_conditioning = false;
-    int32_t text_token_count = 0;
-    bool has_experimental_text_progress = false;
-};
-
-struct TtsStreamHintChunk {
-    int32_t chunk_index = 0;
-    int32_t codec_frame_start = 0;
-    int32_t codec_frame_end = 0;
-    int64_t audio_sample_start = 0;
-    int64_t audio_sample_end = 0;
-    double audio_start_sec = 0.0;
-    double audio_end_sec = 0.0;
-    float rms_energy = 0.0f;
-    float peak_energy = 0.0f;
-    float zero_crossing_rate = 0.0f;
-    TtsHintEnergyClass energy_class = TtsHintEnergyClass::unknown;
-    bool has_speech = false;
-    float speech_occupancy = 0.0f;
-    std::vector<TtsStreamActivitySpan> activity_spans;
-    double text_progress_start = 0.0;
-    double text_progress_end = 0.0;
-    double text_progress = 0.0;
-    int32_t text_token_index_start_estimate = -1;
-    int32_t text_token_index_end_estimate = -1;
-    int32_t text_token_index_estimate = -1;
-    float text_progress_confidence = 0.0f;
-    bool is_text_progress_experimental = false;
-    bool is_paced_chunk = false;
-    bool is_final = false;
-};
 
 struct TtsStreamChunk {
     std::vector<float> samples;
     int32_t sample_rate = 24000;
     bool is_final = false;
-    bool has_hint = false;
-    TtsStreamHintChunk hint;
+};
+
+struct TtsModelCapabilities {
+    bool loaded = false;
+    bool supports_voice_clone = false;
+    bool supports_named_speakers = false;
+    bool supports_instruction = false;
+    int32_t speaker_embedding_dim = 0;
+    int32_t speaker_count = 0;
+    std::string model_type;
 };
 
 struct TtsStreamOptions {
-    std::string output_wav = "examples/bridge_test.wav";
+    // Leave empty to stream without writing a WAV file.
+    std::string output_wav;
     std::string model_identifier;
     std::string instruction;
+    std::string speaker;
+    int32_t language_id = 2050;
     bool voice_design = false;
     float temperature = 0.75f;
     int32_t top_k = 16;
@@ -114,21 +66,34 @@ struct TtsStreamOptions {
     bool async_streaming_decode = true;
     bool cache_instruction_tokens = false;
     std::string instruction_cache_key;
-    std::function<void(const TtsStreamHintHeader&)> hint_header_callback;
 };
 
-using TtsChunkCallback = std::function<void(const TtsStreamChunk&)>;
+// Return false to cancel generation after the current chunk.
+using TtsChunkCallback = std::function<bool(const TtsStreamChunk&)>;
 
 class Qwen3StreamingTts {
 public:
     Qwen3StreamingTts();
     ~Qwen3StreamingTts();
 
-    bool load(const std::string& model_dir);
+    Qwen3StreamingTts(const Qwen3StreamingTts&) = delete;
+    Qwen3StreamingTts& operator=(const Qwen3StreamingTts&) = delete;
+    Qwen3StreamingTts(Qwen3StreamingTts&&) noexcept;
+    Qwen3StreamingTts& operator=(Qwen3StreamingTts&&) noexcept;
+
+    // Load the selected model immediately. An empty identifier selects the
+    // engine's default model from model_dir.
+    bool load(const std::string& model_dir, const std::string& model_identifier = {});
     bool load_speaker_embedding(const std::string& path);
-    bool synthesize_streaming(const std::string& text, const TtsStreamOptions& options, TtsChunkCallback on_chunk);
+    bool synthesize_streaming(const std::string& text,
+                              const TtsStreamOptions& options,
+                              TtsChunkCallback on_chunk = {});
+
+    bool is_loaded() const;
+    const TtsModelCapabilities& capabilities() const;
+    const std::string& last_error() const;
 
 private:
     struct Impl;
-    Impl* impl_ = nullptr;
+    std::unique_ptr<Impl> impl_;
 };
