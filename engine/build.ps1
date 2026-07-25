@@ -158,7 +158,6 @@ $configureArgs = @(
     "-DQWEN3_TTS_COREML=OFF",
     "-DQWEN3_TTS_EMBED_GGML=ON",
     "-DQWEN3_TTS_GGML_DIR=$resolvedGGMLDir",
-    "-DQWEN3_TTS_BUILD_SHARED=OFF",
     "-DQWEN3_TTS_CUDA=$cudaFlag",
     "-DGGML_CUDA=$cudaFlag",
     "-DGGML_CUDA_GRAPHS=$cudaGraphsFlag"

@@ -18,7 +18,7 @@ This is the accepted local baseline for `main` at revision `58661ee` on 2026-07-
 | Sampling | temperature 0.75, top-k 16, residual top-p 0.9, repetition penalty 1.02, CB0 top-p 1.0 |
 | Streaming profile | `offgrid-callback` |
 
-`offgrid-callback` starts with five frames, uses two five-frame ramp windows, then adaptive seven- to eight-frame windows with two frames of left context. Callback playback starts at a configured 350 ms preroll and may build up to 520 ms of lead after startup.
+`offgrid-callback` starts with five frames, uses two five-frame ramp windows, then adaptive seven- to eight-frame windows with two frames of left context. The benchmark evaluates a downstream 350 ms callback buffer and permits up to 520 ms of lead after startup.
 
 ## Top-level results
 
@@ -36,7 +36,7 @@ This is the accepted local baseline for `main` at revision `58661ee` on 2026-07-
 | Callback streaming speed | 1.20-1.25x real time | RTF 0.797-0.835. |
 | Batch synthesis speed | approximately 1.41x real time | Priestley evaluation passage. |
 
-Steady seven-frame windows produce about 560 ms of new PCM in roughly 420-441 ms. The larger post-start lead is therefore intentional: it does not increase the initial 350 ms preroll, but it absorbs bursty vocoder completion.
+Steady seven-frame windows produce about 560 ms of new PCM in roughly 420-441 ms. The larger post-start lead is intentional: it does not increase the benchmark's initial 350 ms downstream buffer target, but it absorbs bursty vocoder completion.
 
 ## Fidelity and reliability
 

@@ -3,9 +3,6 @@
 #include "qwen3_tts.h"
 
 #include <filesystem>
-#include <iostream>
-#include <memory>
-#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -14,89 +11,27 @@ namespace fs = std::filesystem;
 
 namespace {
 
-fs::path Abs(const fs::path& p) {
-    std::error_code ec;
-    return fs::absolute(p, ec);
-}
-
 std::string NormalizeModelName(std::string model_identifier) {
     if (model_identifier.empty()) {
         return {};
     }
 
-    const fs::path p(model_identifier);
-    model_identifier = p.filename().string();
+    model_identifier = fs::path(model_identifier).filename().string();
     if (model_identifier.size() < 5 || model_identifier.substr(model_identifier.size() - 5) != ".gguf") {
         model_identifier += ".gguf";
     }
     return model_identifier;
 }
 
-TtsHintEnergyClass ConvertEnergyClass(qwen3_tts::tts_hint_energy_class value) {
-    switch (value) {
-    case qwen3_tts::tts_hint_energy_class::silence:
-        return TtsHintEnergyClass::silence;
-    case qwen3_tts::tts_hint_energy_class::speech_like:
-        return TtsHintEnergyClass::speech_like;
-    case qwen3_tts::tts_hint_energy_class::burst_like:
-        return TtsHintEnergyClass::burst_like;
-    case qwen3_tts::tts_hint_energy_class::unknown:
-    default:
-        return TtsHintEnergyClass::unknown;
-    }
-}
-
-TtsHintActivityClass ConvertActivityClass(qwen3_tts::tts_hint_activity_class value) {
-    switch (value) {
-    case qwen3_tts::tts_hint_activity_class::silence:
-        return TtsHintActivityClass::silence;
-    case qwen3_tts::tts_hint_activity_class::speech_like:
-        return TtsHintActivityClass::speech_like;
-    case qwen3_tts::tts_hint_activity_class::burst_like:
-        return TtsHintActivityClass::burst_like;
-    case qwen3_tts::tts_hint_activity_class::unknown:
-    default:
-        return TtsHintActivityClass::unknown;
-    }
-}
-
-TtsStreamHintChunk ConvertHintChunk(const qwen3_tts::tts_stream_hint_chunk & chunk) {
-    TtsStreamHintChunk out;
-    out.chunk_index = chunk.chunk_index;
-    out.codec_frame_start = chunk.codec_frame_start;
-    out.codec_frame_end = chunk.codec_frame_end;
-    out.audio_sample_start = chunk.audio_sample_start;
-    out.audio_sample_end = chunk.audio_sample_end;
-    out.audio_start_sec = chunk.audio_start_sec;
-    out.audio_end_sec = chunk.audio_end_sec;
-    out.rms_energy = chunk.rms_energy;
-    out.peak_energy = chunk.peak_energy;
-    out.zero_crossing_rate = chunk.zero_crossing_rate;
-    out.energy_class = ConvertEnergyClass(chunk.energy_class);
-    out.has_speech = chunk.has_speech;
-    out.speech_occupancy = chunk.speech_occupancy;
-    out.activity_spans.reserve(chunk.activity_spans.size());
-    for (const qwen3_tts::tts_stream_activity_span & span : chunk.activity_spans) {
-        TtsStreamActivitySpan out_span;
-        out_span.audio_sample_start = span.audio_sample_start;
-        out_span.audio_sample_end = span.audio_sample_end;
-        out_span.audio_start_sec = span.audio_start_sec;
-        out_span.audio_end_sec = span.audio_end_sec;
-        out_span.activity_class = ConvertActivityClass(span.activity_class);
-        out_span.confidence = span.confidence;
-        out_span.is_experimental = span.is_experimental;
-        out.activity_spans.push_back(out_span);
-    }
-    out.text_progress_start = chunk.text_progress_start;
-    out.text_progress_end = chunk.text_progress_end;
-    out.text_progress = chunk.text_progress;
-    out.text_token_index_start_estimate = chunk.text_token_index_start_estimate;
-    out.text_token_index_end_estimate = chunk.text_token_index_end_estimate;
-    out.text_token_index_estimate = chunk.text_token_index_estimate;
-    out.text_progress_confidence = chunk.text_progress_confidence;
-    out.is_text_progress_experimental = chunk.is_text_progress_experimental;
-    out.is_paced_chunk = chunk.is_paced_chunk;
-    out.is_final = chunk.is_final;
+TtsModelCapabilities ConvertCapabilities(const qwen3_tts::tts_model_capabilities& caps) {
+    TtsModelCapabilities out;
+    out.loaded = caps.loaded;
+    out.supports_voice_clone = caps.supports_voice_clone;
+    out.supports_named_speakers = caps.supports_named_speakers;
+    out.supports_instruction = caps.supports_instruction;
+    out.speaker_embedding_dim = caps.speaker_embedding_dim;
+    out.speaker_count = caps.speaker_count;
+    out.model_type = caps.model_type;
     return out;
 }
 
@@ -104,29 +39,41 @@ TtsStreamHintChunk ConvertHintChunk(const qwen3_tts::tts_stream_hint_chunk & chu
 
 struct Qwen3StreamingTts::Impl {
     qwen3_tts::Qwen3TTS engine;
-    std::string model_dir = "models";
+    std::string model_dir;
     std::string loaded_model_name;
-    qwen3_tts::tts_model_capabilities caps;
+    std::string error;
+    TtsModelCapabilities caps;
     std::vector<float> speaker_embedding;
 };
 
 Qwen3StreamingTts::Qwen3StreamingTts()
-    : impl_(new Impl()) {}
+    : impl_(std::make_unique<Impl>()) {}
 
-Qwen3StreamingTts::~Qwen3StreamingTts() {
-    delete impl_;
-}
+Qwen3StreamingTts::~Qwen3StreamingTts() = default;
+Qwen3StreamingTts::Qwen3StreamingTts(Qwen3StreamingTts&&) noexcept = default;
+Qwen3StreamingTts& Qwen3StreamingTts::operator=(Qwen3StreamingTts&&) noexcept = default;
 
-bool Qwen3StreamingTts::load(const std::string& model_dir) {
+bool Qwen3StreamingTts::load(const std::string& model_dir, const std::string& model_identifier) {
+    impl_->error.clear();
     if (!fs::is_directory(model_dir)) {
-        std::cerr << "Model directory does not exist: " << model_dir << "\n";
+        impl_->error = "Model directory does not exist: " + model_dir;
         return false;
     }
+
+    const std::string model_name = NormalizeModelName(model_identifier);
+    if (!impl_->engine.load_models(model_dir, model_name)) {
+        impl_->error = "Failed to load engine models: " + impl_->engine.get_error();
+        return false;
+    }
+
     impl_->model_dir = model_dir;
+    impl_->loaded_model_name = model_name;
+    impl_->caps = ConvertCapabilities(impl_->engine.get_model_capabilities());
     return true;
 }
 
 bool Qwen3StreamingTts::load_speaker_embedding(const std::string& path) {
+    impl_->error.clear();
     if (path.empty()) {
         impl_->speaker_embedding.clear();
         return true;
@@ -134,7 +81,7 @@ bool Qwen3StreamingTts::load_speaker_embedding(const std::string& path) {
 
     std::vector<float> embedding;
     if (!qwen3_tts::load_speaker_embedding_file(path, embedding)) {
-        std::cerr << "Failed to load speaker embedding: " << path << "\n";
+        impl_->error = "Failed to load speaker embedding: " + path;
         return false;
     }
 
@@ -147,35 +94,29 @@ bool Qwen3StreamingTts::synthesize_streaming(
     const TtsStreamOptions& options,
     TtsChunkCallback on_chunk)
 {
-    const std::string model_name = NormalizeModelName(options.model_identifier);
-    if (!impl_->engine.is_loaded() || impl_->loaded_model_name != model_name) {
-        if (!impl_->engine.load_models(impl_->model_dir, model_name)) {
-            std::cerr << "Failed to load engine models: " << impl_->engine.get_error() << "\n";
+    impl_->error.clear();
+    const std::string requested_model = NormalizeModelName(options.model_identifier);
+    if (!impl_->engine.is_loaded()) {
+        impl_->error = "No model is loaded. Call load() before synthesis.";
+        return false;
+    }
+    if (!requested_model.empty() && requested_model != impl_->loaded_model_name) {
+        if (!load(impl_->model_dir, requested_model)) {
             return false;
         }
-        impl_->loaded_model_name = model_name;
-        impl_->caps = impl_->engine.get_model_capabilities();
-        std::cerr << "Loaded model type: " << impl_->caps.model_type
-                  << " | supports_instruction=" << (impl_->caps.supports_instruction ? "yes" : "no")
-                  << " | supports_voice_clone=" << (impl_->caps.supports_voice_clone ? "yes" : "no")
-                  << " | supports_named_speakers=" << (impl_->caps.supports_named_speakers ? "yes" : "no")
-                  << "\n";
     }
 
     const bool is_voice_design_model = impl_->caps.model_type == "voice_design";
     if (options.voice_design && !is_voice_design_model) {
-        std::cerr << "--voice-design was requested, but loaded model type is '" << impl_->caps.model_type << "'\n";
+        impl_->error = "Voice design was requested for model type '" + impl_->caps.model_type + "'.";
         return false;
     }
-    if (is_voice_design_model && !options.voice_design) {
-        std::cerr << "VoiceDesign model detected; enabling voice-design behavior automatically.\n";
-    }
     if (is_voice_design_model && options.instruction.empty()) {
-        std::cerr << "VoiceDesign requires a non-empty instruction. Use --voice-design-instruct or --instruction.\n";
+        impl_->error = "VoiceDesign requires a non-empty instruction.";
         return false;
     }
     if (is_voice_design_model && !impl_->speaker_embedding.empty()) {
-        std::cerr << "VoiceDesign does not accept speaker embeddings. Remove --speaker-embedding.\n";
+        impl_->error = "VoiceDesign does not accept speaker embeddings.";
         return false;
     }
 
@@ -191,6 +132,8 @@ bool Qwen3StreamingTts::synthesize_streaming(
     params.cb0_top_p = options.cb0_top_p;
     params.repetition_penalty = options.repetition_penalty;
     params.seed = options.seed;
+    params.language_id = options.language_id;
+    params.speaker = options.speaker;
     params.streaming_generate = true;
     params.async_streaming_decode = options.async_streaming_decode;
     params.play_streaming = options.play_streaming;
@@ -218,49 +161,17 @@ bool Qwen3StreamingTts::synthesize_streaming(
     params.steady_split_decode_frames = options.steady_split_decode_frames;
     params.dump_first_frame_profile = options.dump_first_frame_profile;
     params.dump_streaming_overlap = options.dump_streaming_overlap;
-    if (options.hint_header_callback) {
-        params.stream_hint_header_callback =
-            [on_hint_header = options.hint_header_callback](const qwen3_tts::tts_stream_hint_header & header) {
-                TtsStreamHintHeader out;
-                out.sample_rate = header.sample_rate;
-                out.model_type = header.model_type;
-                out.has_instruction = header.has_instruction;
-                out.has_speaker_conditioning = header.has_speaker_conditioning;
-                out.text_token_count = header.text_token_count;
-                out.has_experimental_text_progress = header.has_experimental_text_progress;
-                on_hint_header(out);
-            };
-    }
     if (on_chunk) {
-        auto pending_hint_mutex = std::make_shared<std::mutex>();
-        auto pending_hint = std::make_shared<TtsStreamHintChunk>();
-        auto pending_hint_valid = std::make_shared<bool>(false);
-        params.stream_hint_chunk_callback =
-            [pending_hint_mutex, pending_hint, pending_hint_valid](const qwen3_tts::tts_stream_hint_chunk & hint) -> bool {
-                std::lock_guard<std::mutex> lock(*pending_hint_mutex);
-                *pending_hint = ConvertHintChunk(hint);
-                *pending_hint_valid = true;
-                return true;
-            };
-        params.audio_chunk_callback =
-            [on_chunk, pending_hint_mutex, pending_hint, pending_hint_valid](const float* samples, int32_t n_samples, int32_t sample_rate, bool is_final) -> bool {
-                TtsStreamChunk chunk;
-                chunk.sample_rate = sample_rate;
-                chunk.is_final = is_final;
-                {
-                    std::lock_guard<std::mutex> lock(*pending_hint_mutex);
-                    if (*pending_hint_valid) {
-                        chunk.has_hint = true;
-                        chunk.hint = *pending_hint;
-                        *pending_hint_valid = false;
-                    }
-                }
-                if (samples && n_samples > 0) {
-                    chunk.samples.assign(samples, samples + n_samples);
-                }
-                on_chunk(chunk);
-                return true;
-            };
+        params.audio_chunk_callback = [on_chunk = std::move(on_chunk)](
+            const float* samples, int32_t n_samples, int32_t sample_rate, bool is_final) {
+            TtsStreamChunk chunk;
+            chunk.sample_rate = sample_rate;
+            chunk.is_final = is_final;
+            if (samples && n_samples > 0) {
+                chunk.samples.assign(samples, samples + n_samples);
+            }
+            return on_chunk(chunk);
+        };
     }
 
     qwen3_tts::tts_result result;
@@ -269,19 +180,38 @@ bool Qwen3StreamingTts::synthesize_streaming(
     } else {
         result = impl_->engine.synthesize(text, params);
     }
-
     if (!result.success) {
-        std::cerr << "Synthesis failed: " << result.error_msg << "\n";
+        impl_->error = "Synthesis failed: " + result.error_msg;
         return false;
     }
 
-    const fs::path output_wav = Abs(options.output_wav.empty() ? fs::path("examples/bridge_test.wav") : fs::path(options.output_wav));
-    std::error_code ec;
-    fs::create_directories(output_wav.parent_path(), ec);
-    if (!qwen3_tts::save_audio_file(output_wav.string(), result.audio, result.sample_rate)) {
-        std::cerr << "Failed to write output WAV: " << output_wav.string() << "\n";
-        return false;
+    if (!options.output_wav.empty()) {
+        const fs::path output_wav = fs::absolute(fs::path(options.output_wav));
+        std::error_code ec;
+        if (!output_wav.parent_path().empty()) {
+            fs::create_directories(output_wav.parent_path(), ec);
+            if (ec) {
+                impl_->error = "Failed to create output directory: " + ec.message();
+                return false;
+            }
+        }
+        if (!qwen3_tts::save_audio_file(output_wav.string(), result.audio, result.sample_rate)) {
+            impl_->error = "Failed to write output WAV: " + output_wav.string();
+            return false;
+        }
     }
 
     return true;
+}
+
+bool Qwen3StreamingTts::is_loaded() const {
+    return impl_->engine.is_loaded();
+}
+
+const TtsModelCapabilities& Qwen3StreamingTts::capabilities() const {
+    return impl_->caps;
+}
+
+const std::string& Qwen3StreamingTts::last_error() const {
+    return impl_->error;
 }

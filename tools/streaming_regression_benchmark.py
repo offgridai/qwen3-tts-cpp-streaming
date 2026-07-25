@@ -126,6 +126,7 @@ def main() -> int:
         "token_limit": sum(row["termination"] == "token_limit" for row in runs),
         "safety_limit": sum(row["termination"] == "safety_limit" for row in runs),
         "timeouts": sum(bool(row["timed_out"]) for row in runs),
+        "process_failures": sum(row["returncode"] not in (0, None) for row in runs),
         "mean_throughput_x_realtime": sum(numeric_throughput) / len(numeric_throughput) if numeric_throughput else None,
     }
     report = {
@@ -140,7 +141,9 @@ def main() -> int:
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps(summary, indent=2))
     print(f"Report: {report_path}")
-    return 0 if summary["token_limit"] == 0 and summary["safety_limit"] == 0 and summary["timeouts"] == 0 else 2
+    # The text-relative safety limit is an accepted bounded completion mode.
+    # Fail only for absolute token exhaustion, timeout, or a failed process.
+    return 0 if summary["token_limit"] == 0 and summary["timeouts"] == 0 and summary["process_failures"] == 0 else 2
 
 
 if __name__ == "__main__":

@@ -166,7 +166,6 @@ add_library(tts_engine STATIC
     src/pipeline/pipeline_runtime.cpp
     src/pipeline/pipeline_synthesize.cpp
     src/qwen3_tts.cpp
-    src/qwen3_tts_c.cpp
 )
 target_include_directories(tts_engine PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -184,17 +183,6 @@ if(WIN32)
     target_link_libraries(tts_engine PUBLIC Psapi)
 endif()
 add_library(qwen3_tts ALIAS tts_engine)
-
-# Shared library for JNI (Android/JVM)
-option(QWEN3_TTS_BUILD_SHARED "Build shared library for JNI" OFF)
-if(QWEN3_TTS_BUILD_SHARED)
-    find_package(JNI REQUIRED)
-    add_library(qwen3_tts_jni SHARED
-        src/qwen3_tts_jni.cpp
-    )
-    target_link_libraries(qwen3_tts_jni PRIVATE tts_engine JNI::JNI)
-    target_compile_definitions(tts_engine PRIVATE QWEN3_TTS_EXPORT)
-endif()
 
 # CLI executable
 add_executable(tts_engine_cli
@@ -226,6 +214,5 @@ install(FILES
     src/audio_tokenizer_encoder.h 
     src/audio_tokenizer_decoder.h 
     src/qwen3_tts.h
-    src/qwen3_tts_c.h
     DESTINATION include
 )
