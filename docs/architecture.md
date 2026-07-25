@@ -86,3 +86,16 @@ Windows live playback is owned by the engine. The device is retained by each `Qw
 - `apps/streaming_cli/src/cli/main.cpp`: streaming/profile harness.
 
 The integration path is controlled by `QWEN3_TTS_BUILD_STREAMING_WRAPPER`; its CLI can be omitted independently with `QWEN3_TTS_BUILD_STREAMING_CLI=OFF`. The Windows streaming CLI routes diagnostics to stdout so PowerShell does not render normal engine logs as errors.
+
+## CUDA deployment
+
+Normal CUDA builds use the `portable` architecture policy. CUDA 12.8 or newer
+emits Ada `sm_89` cubin and PTX for RTX 4090-class GPUs together with native
+Blackwell `sm_120a` cubin for RTX 5090-class GPUs. CUDA 11.8 through 12.7 emits
+the Ada target only. `QWEN3_TTS_CUDA_ARCHITECTURES=native` is available for
+faster local compilation, and an explicit CMake architecture list can be used
+for controlled packaging.
+
+On Windows, the current GGML runtime DLLs are copied beside each CLI after it
+links. This copy is a target dependency so rebuilding GGML cannot leave an
+older, single-architecture DLL beside a newer executable.

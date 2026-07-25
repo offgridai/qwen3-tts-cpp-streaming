@@ -20,6 +20,11 @@ This is the accepted local baseline for `main` at revision `58661ee` on 2026-07-
 
 `offgrid-callback` starts with five frames, uses two five-frame ramp windows, then adaptive seven- to eight-frame windows with two frames of left context. The benchmark evaluates a downstream 350 ms callback buffer and permits up to 520 ms of lead after startup.
 
+The distributable CUDA build now contains native RTX 4090 (`sm_89`) and RTX
+5090 (`sm_120a`) kernels. All figures below remain RTX 5090 measurements; they
+must not be treated as an RTX 4090 performance claim until the acceptance suite
+has run on that hardware.
+
 ## Top-level results
 
 | Dimension | Current baseline | Notes |

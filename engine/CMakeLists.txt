@@ -34,8 +34,44 @@ option(QWEN3_TTS_EMBED_GGML "Build GGML as a CMake subdirectory instead of linki
 set(QWEN3_TTS_GGML_BUILD_DIR "${QWEN3_TTS_GGML_DIR}/build" CACHE PATH "Path to prebuilt GGML build directory (used when QWEN3_TTS_EMBED_GGML=OFF)")
 
 option(QWEN3_TTS_CUDA "Enable CUDA backend via GGML" OFF)
+set(QWEN3_TTS_CUDA_ARCHITECTURES "portable" CACHE STRING
+    "CUDA targets: portable, native, or a CMake architecture list such as 89;120a-real")
+set_property(CACHE QWEN3_TTS_CUDA_ARCHITECTURES PROPERTY STRINGS portable native)
 if(QWEN3_TTS_CUDA)
     set(GGML_CUDA ON CACHE BOOL "Enable GGML CUDA backend" FORCE)
+
+    # GGML otherwise defaults to the GPU present at build time. That produces a
+    # single-architecture DLL which cannot be redistributed between Ada (RTX
+    # 40-series) and Blackwell (RTX 50-series) machines. Keep an explicit native
+    # mode for quick local builds, but make normal builds portable across the two
+    # generations this project actively supports.
+    if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+        find_package(CUDAToolkit REQUIRED)
+
+        if(QWEN3_TTS_CUDA_ARCHITECTURES STREQUAL "portable")
+            if(CUDAToolkit_VERSION VERSION_LESS "11.8")
+                message(FATAL_ERROR
+                    "The portable CUDA build requires CUDA 11.8 or newer for RTX 4090 (sm_89) support.")
+            endif()
+
+            # No suffix emits both native cubin and forward-compatible PTX for
+            # Ada. Blackwell's architecture-specific target requires CUDA 12.8.
+            set(_qwen3_cuda_architectures 89)
+            if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "12.8")
+                list(APPEND _qwen3_cuda_architectures 120a-real)
+            endif()
+            set(CMAKE_CUDA_ARCHITECTURES "${_qwen3_cuda_architectures}")
+        elseif(QWEN3_TTS_CUDA_ARCHITECTURES STREQUAL "native")
+            set(CMAKE_CUDA_ARCHITECTURES native)
+        elseif(QWEN3_TTS_CUDA_ARCHITECTURES)
+            set(CMAKE_CUDA_ARCHITECTURES "${QWEN3_TTS_CUDA_ARCHITECTURES}")
+        else()
+            message(FATAL_ERROR
+                "QWEN3_TTS_CUDA_ARCHITECTURES must be portable, native, or a CMake architecture list.")
+        endif()
+    endif()
+
+    message(STATUS "Qwen3-TTS CUDA architectures: ${CMAKE_CUDA_ARCHITECTURES}")
 endif()
 
 set(GGML_DIR "${QWEN3_TTS_GGML_DIR}")
@@ -200,6 +236,16 @@ target_include_directories(tts_engine_quantize PRIVATE
     ${GGML_DIR}/include
 )
 qwen3_link_ggml(tts_engine_quantize)
+
+if(WIN32 AND QWEN3_TTS_EMBED_GGML)
+    foreach(engine_executable tts_engine_cli tts_engine_quantize)
+        add_custom_command(TARGET ${engine_executable} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                ${CMAKE_BINARY_DIR}/bin
+                $<TARGET_FILE_DIR:${engine_executable}>
+        )
+    endforeach()
+endif()
 
 # Install targets
 install(TARGETS text_tokenizer tts_transformer audio_tokenizer_encoder audio_tokenizer_decoder tts_engine tts_engine_cli tts_engine_quantize
