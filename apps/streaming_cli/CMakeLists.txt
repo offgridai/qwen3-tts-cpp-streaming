@@ -23,6 +23,13 @@ if(QWEN3_TTS_BUILD_STREAMING_CLI)
     else()
         target_compile_options(qwen3_streaming_cli PRIVATE -Wall -Wextra -Wpedantic)
     endif()
+    if(WIN32 AND QWEN3_TTS_EMBED_GGML)
+        add_custom_command(TARGET qwen3_streaming_cli POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                ${CMAKE_BINARY_DIR}/bin
+                $<TARGET_FILE_DIR:qwen3_streaming_cli>
+        )
+    endif()
 endif()
 
 if(QWEN3_TTS_BUILD_STREAMING_WRAPPER)

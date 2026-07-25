@@ -12,6 +12,9 @@ Native Qwen3-TTS inference in C++17 with GGML and optional CUDA acceleration. Th
 - Ninja and the CUDA Toolkit for the recommended Windows GPU build
 - Python 3 for model preparation and benchmark utilities
 
+CUDA 11.8 or newer is required for RTX 4090 builds. CUDA 12.8 or newer is
+recommended for distributable builds that also contain native RTX 5090 kernels.
+
 Run the following commands from a Visual Studio Developer PowerShell in the repository root.
 
 ### 2. Prepare models
@@ -36,6 +39,7 @@ cmake -S . -B build-ninja-cuda -G Ninja `
   -DQWEN3_TTS_COREML=OFF `
   -DQWEN3_TTS_EMBED_GGML=ON `
   -DQWEN3_TTS_CUDA=ON `
+  -DQWEN3_TTS_CUDA_ARCHITECTURES=portable `
   -DGGML_CUDA=ON `
   -DGGML_CUDA_GRAPHS=ON
 
@@ -76,6 +80,29 @@ build-ninja-cuda/engine/tts_engine_quantize.exe
 ```
 
 Generated `ggml*.dll` files must be beside the executable or available on `PATH`. The normal build places copies beside the CLIs.
+
+### CUDA GPU compatibility
+
+`portable` is the default CUDA architecture policy. With CUDA 12.8 or newer it
+builds native kernels for both RTX 4090-class Ada GPUs (`sm_89`) and RTX
+5090-class Blackwell GPUs (`sm_120a`), plus Ada PTX. With CUDA 11.8 through
+12.7 it builds the Ada target only.
+
+Use a native-only build to reduce compilation time while iterating on one
+machine:
+
+```powershell
+cmake -S . -B build-ninja-native -G Ninja `
+  -DQWEN3_TTS_CUDA=ON `
+  -DQWEN3_TTS_CUDA_ARCHITECTURES=native
+```
+
+An explicit CMake architecture list is also accepted. Release artifacts meant
+for both GPU generations should be built with CUDA 12.8 or newer and
+`portable`; do not redistribute a `native` build from an RTX 5090 as an RTX
+4090-compatible binary. The RTX 4090 target is compile-validated, but current
+performance measurements were collected on an RTX 5090; a physical RTX 4090
+acceptance run remains outstanding.
 
 ## Streaming integration library
 

@@ -10,6 +10,7 @@ param (
     [string]$Configuration = "Release",
     [string]$BuildDir = "",
     [string]$GGMLDir = "",
+    [string]$CudaArchitectures = "portable",
     [string]$Target = "tts_engine_cli",
     [string]$ModelDir = "models",
     [string]$SmokeText = "This is a test synthesis from build.ps1."
@@ -159,6 +160,7 @@ $configureArgs = @(
     "-DQWEN3_TTS_EMBED_GGML=ON",
     "-DQWEN3_TTS_GGML_DIR=$resolvedGGMLDir",
     "-DQWEN3_TTS_CUDA=$cudaFlag",
+    "-DQWEN3_TTS_CUDA_ARCHITECTURES=$CudaArchitectures",
     "-DGGML_CUDA=$cudaFlag",
     "-DGGML_CUDA_GRAPHS=$cudaGraphsFlag"
 )
