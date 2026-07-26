@@ -26,6 +26,15 @@ struct BatchNamedPath {
     std::filesystem::path path;
 };
 
+struct BatchJob {
+    std::string id;
+    std::string transcript_id;
+    std::filesystem::path transcript_path;
+    std::string voice_id;
+    std::filesystem::path voice_path;
+    int64_t seed = 0;
+};
+
 bool IsSafeBatchId(const std::string& id) {
     if (id.empty()) return false;
     return std::all_of(id.begin(), id.end(), [](unsigned char c) {
@@ -92,15 +101,84 @@ bool ReadTextFile(const std::filesystem::path& path, std::string& out) {
     return !out.empty();
 }
 
+bool ParseSeed(const std::string& value, int64_t& out) {
+    try {
+        size_t consumed = 0;
+        out = std::stoll(value, &consumed);
+        return consumed == value.size();
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+bool ReadBatchJobs(const std::filesystem::path& list_path,
+                   std::vector<BatchJob>& out) {
+    std::ifstream input(list_path);
+    if (!input) {
+        std::cerr << "Failed to open batch job list: " << list_path << "\n";
+        return false;
+    }
+    const std::filesystem::path base = std::filesystem::absolute(list_path).parent_path();
+    std::string line;
+    int line_number = 0;
+    while (std::getline(input, line)) {
+        ++line_number;
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty() || line.front() == '#') continue;
+        std::vector<std::string> fields;
+        std::istringstream row_input(line);
+        std::string field;
+        while (std::getline(row_input, field, '\t')) fields.push_back(field);
+        if (fields.size() != 5) {
+            std::cerr << "Batch job list line " << line_number
+                      << " must be <id><TAB><transcript-path><TAB><voice-id>"
+                         "<TAB><voice-path><TAB><seed>.\n";
+            return false;
+        }
+        BatchJob job;
+        job.id = fields[0];
+        job.transcript_id = fields[0];
+        job.transcript_path = fields[1];
+        job.voice_id = fields[2];
+        job.voice_path = fields[3];
+        if (!IsSafeBatchId(job.id) || !IsSafeBatchId(job.voice_id)
+            || job.transcript_path.empty() || job.voice_path.empty()
+            || !ParseSeed(fields[4], job.seed)) {
+            std::cerr << "Invalid batch job list line " << line_number << ".\n";
+            return false;
+        }
+        if (job.transcript_path.is_relative()) job.transcript_path = base / job.transcript_path;
+        if (job.voice_path.is_relative()) job.voice_path = base / job.voice_path;
+        job.transcript_path = std::filesystem::absolute(job.transcript_path).lexically_normal();
+        job.voice_path = std::filesystem::absolute(job.voice_path).lexically_normal();
+        if (!std::filesystem::exists(job.transcript_path)
+            || !std::filesystem::exists(job.voice_path)) {
+            std::cerr << "Batch job path does not exist on line " << line_number << ".\n";
+            return false;
+        }
+        if (std::any_of(out.begin(), out.end(), [&](const BatchJob& existing) {
+                return existing.id == job.id;
+            })) {
+            std::cerr << "Duplicate batch job id: " << job.id << "\n";
+            return false;
+        }
+        out.push_back(std::move(job));
+    }
+    if (out.empty()) {
+        std::cerr << "Batch job list is empty: " << list_path << "\n";
+        return false;
+    }
+    return true;
+}
+
 bool ParseBatchSeeds(const std::string& value, std::vector<int64_t>& out) {
     std::istringstream input(value);
     std::string part;
     try {
         while (std::getline(input, part, ',')) {
             if (part.empty()) continue;
-            size_t consumed = 0;
-            const int64_t seed = std::stoll(part, &consumed);
-            if (consumed != part.size()) return false;
+            int64_t seed = 0;
+            if (!ParseSeed(part, seed)) return false;
             if (std::find(out.begin(), out.end(), seed) == out.end()) out.push_back(seed);
         }
     } catch (const std::exception&) {
@@ -196,6 +274,7 @@ void PrintUsage() {
         << "  --instruction-cache-key <key> --repeat <n>\n"
         << "  --batch-transcript-list <tsv> --batch-voice-list <tsv>\n"
         << "  --batch-seeds <comma-list> --batch-output-dir <path>\n"
+        << "  --batch-job-list <tsv> --batch-output-dir <path>\n"
         << "  --simulate-stream-callback --dump-first-frame-profile --dump-streaming-overlap\n";
 }
 
@@ -220,6 +299,7 @@ int main(int argc, char** argv) {
     std::string batch_voice_list;
     std::string batch_seeds_text;
     std::string batch_output_dir;
+    std::string batch_job_list;
 
     TtsStreamOptions options;
     options.output_wav = "examples/bridge_test.wav";
@@ -298,6 +378,7 @@ int main(int argc, char** argv) {
         else if (a == "--batch-voice-list") batch_voice_list = next();
         else if (a == "--batch-seeds") batch_seeds_text = next();
         else if (a == "--batch-output-dir") batch_output_dir = next();
+        else if (a == "--batch-job-list") batch_job_list = next();
         else if (a == "--simulate-stream-callback") simulate_stream_callback = true;
         else if (a == "-h" || a == "--help") { PrintUsage(); return 0; }
         else {
@@ -310,22 +391,37 @@ int main(int argc, char** argv) {
         options.play_streaming = false;
     }
 
-    const bool batch_requested = !batch_transcript_list.empty()
+    const bool cartesian_batch_requested = !batch_transcript_list.empty()
         || !batch_voice_list.empty()
-        || !batch_seeds_text.empty()
-        || !batch_output_dir.empty();
-    if (batch_requested && (batch_transcript_list.empty()
+        || !batch_seeds_text.empty();
+    const bool job_batch_requested = !batch_job_list.empty();
+    const bool batch_requested = cartesian_batch_requested || job_batch_requested;
+    if (!batch_output_dir.empty() && !batch_requested) {
+        std::cerr << "--batch-output-dir requires a batch input list.\n";
+        return 2;
+    }
+    if (cartesian_batch_requested && job_batch_requested) {
+        std::cerr << "Use either --batch-job-list or the Cartesian batch lists, not both.\n";
+        return 2;
+    }
+    if (batch_requested && batch_output_dir.empty()) {
+        std::cerr << "Batch mode requires --batch-output-dir.\n";
+        return 2;
+    }
+    if (cartesian_batch_requested && (batch_transcript_list.empty()
         || batch_voice_list.empty()
-        || batch_seeds_text.empty()
-        || batch_output_dir.empty())) {
-        std::cerr << "Batch mode requires transcript list, voice list, seeds, and output directory.\n";
+        || batch_seeds_text.empty())) {
+        std::cerr << "Cartesian batch mode requires transcript list, voice list, and seeds.\n";
         return 2;
     }
 
-    std::vector<BatchNamedPath> batch_transcripts;
-    std::vector<BatchNamedPath> batch_voices;
-    std::vector<int64_t> batch_seeds;
-    if (batch_requested) {
+    std::vector<BatchJob> batch_jobs;
+    if (job_batch_requested) {
+        if (!ReadBatchJobs(batch_job_list, batch_jobs)) return 2;
+    } else if (cartesian_batch_requested) {
+        std::vector<BatchNamedPath> batch_transcripts;
+        std::vector<BatchNamedPath> batch_voices;
+        std::vector<int64_t> batch_seeds;
         if (!ReadBatchNamedPaths(batch_transcript_list, "transcript", batch_transcripts)) {
             return 2;
         }
@@ -335,6 +431,21 @@ int main(int argc, char** argv) {
         if (!ParseBatchSeeds(batch_seeds_text, batch_seeds)) {
             std::cerr << "Invalid or empty --batch-seeds value.\n";
             return 2;
+        }
+        for (const BatchNamedPath& voice : batch_voices) {
+            for (const BatchNamedPath& transcript : batch_transcripts) {
+                for (const int64_t seed : batch_seeds) {
+                    BatchJob job;
+                    job.id = transcript.id + "__" + voice.id
+                        + "__seed_" + std::to_string(seed);
+                    job.transcript_id = transcript.id;
+                    job.transcript_path = transcript.path;
+                    job.voice_id = voice.id;
+                    job.voice_path = voice.path;
+                    job.seed = seed;
+                    batch_jobs.push_back(std::move(job));
+                }
+            }
         }
     }
 
@@ -366,40 +477,44 @@ int main(int argc, char** argv) {
             std::cerr << "Failed to create batch result index.\n";
             return 1;
         }
-        index << "transcript_id\tvoice_id\tseed\toutput_wav\n";
-        const size_t total = batch_transcripts.size() * batch_voices.size() * batch_seeds.size();
+        index << "job_id\ttranscript_id\tvoice_id\tseed\toutput_wav\n";
+        const size_t total = batch_jobs.size();
         size_t completed = 0;
-        for (const BatchNamedPath& voice : batch_voices) {
-            if (!tts.load_speaker_embedding(voice.path.string())) {
+        std::filesystem::path loaded_voice_path;
+        std::filesystem::path loaded_transcript_path;
+        std::string batch_text;
+        for (const BatchJob& job : batch_jobs) {
+            if (job.voice_path != loaded_voice_path) {
+                if (!tts.load_speaker_embedding(job.voice_path.string())) {
+                    std::cerr << tts.last_error() << "\n";
+                    return 1;
+                }
+                loaded_voice_path = job.voice_path;
+            }
+            if (job.transcript_path != loaded_transcript_path) {
+                if (!ReadTextFile(job.transcript_path, batch_text)) {
+                    std::cerr << "Failed to read batch transcript: " << job.transcript_path << "\n";
+                    return 1;
+                }
+                loaded_transcript_path = job.transcript_path;
+            }
+            TtsStreamOptions run_options = options;
+            run_options.seed = job.seed;
+            const std::string filename = job.id + ".wav";
+            run_options.output_wav = (output_dir / filename).string();
+            std::cout << "[batch] " << (completed + 1) << "/" << total
+                      << " job=" << job.id
+                      << " transcript=" << job.transcript_id
+                      << " voice=" << job.voice_id
+                      << " seed=" << job.seed << "\n";
+            if (!tts.synthesize_streaming(batch_text, run_options, on_chunk)) {
                 std::cerr << tts.last_error() << "\n";
                 return 1;
             }
-            for (const BatchNamedPath& transcript : batch_transcripts) {
-                std::string batch_text;
-                if (!ReadTextFile(transcript.path, batch_text)) {
-                    std::cerr << "Failed to read batch transcript: " << transcript.path << "\n";
-                    return 1;
-                }
-                for (const int64_t seed : batch_seeds) {
-                    TtsStreamOptions run_options = options;
-                    run_options.seed = seed;
-                    const std::string filename = transcript.id + "__" + voice.id
-                        + "__seed_" + std::to_string(seed) + ".wav";
-                    run_options.output_wav = (output_dir / filename).string();
-                    std::cout << "[batch] " << (completed + 1) << "/" << total
-                              << " transcript=" << transcript.id
-                              << " voice=" << voice.id
-                              << " seed=" << seed << "\n";
-                    if (!tts.synthesize_streaming(batch_text, run_options, on_chunk)) {
-                        std::cerr << tts.last_error() << "\n";
-                        return 1;
-                    }
-                    index << transcript.id << '\t' << voice.id << '\t' << seed
-                          << '\t' << filename << '\n';
-                    index.flush();
-                    ++completed;
-                }
-            }
+            index << job.id << '\t' << job.transcript_id << '\t' << job.voice_id
+                  << '\t' << job.seed << '\t' << filename << '\n';
+            index.flush();
+            ++completed;
         }
         std::cout << "[batch] completed " << completed << " utterances\n";
         return 0;

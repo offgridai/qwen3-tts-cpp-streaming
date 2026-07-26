@@ -88,6 +88,16 @@ Outputs are named `<transcript-id>__<voice-id>__seed_<seed>.wav`. A
 `batch_results.tsv` index is written alongside them. The model remains loaded
 for the entire batch, while each voice embedding is loaded once per voice.
 
+For exact per-utterance assignments, use `--batch-job-list <tsv>` instead of
+the three Cartesian inputs. Each non-comment row has five tab-separated fields:
+
+```text
+job-id  transcript-path  voice-id  voice-json-path  seed
+```
+
+Paths may be relative to the job-list file. Each job produces `<job-id>.wav`;
+ordering jobs by voice avoids reloading the same speaker embedding.
+
 ## Build options and outputs
 
 `QWEN3_TTS_BUILD_STREAMING_WRAPPER=OFF` omits the integration library and its CLI. `QWEN3_TTS_BUILD_STREAMING_CLI=OFF` builds the library without the harness.
