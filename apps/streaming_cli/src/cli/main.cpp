@@ -1,11 +1,15 @@
 #include "offgrid_tts/Qwen3StreamingTts.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
+#include <vector>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -16,6 +20,94 @@
 #endif
 
 namespace {
+
+struct BatchNamedPath {
+    std::string id;
+    std::filesystem::path path;
+};
+
+bool IsSafeBatchId(const std::string& id) {
+    if (id.empty()) return false;
+    return std::all_of(id.begin(), id.end(), [](unsigned char c) {
+        return std::isalnum(c) != 0 || c == '_' || c == '-';
+    });
+}
+
+bool ReadBatchNamedPaths(const std::filesystem::path& list_path,
+                         const char* kind,
+                         std::vector<BatchNamedPath>& out) {
+    std::ifstream input(list_path);
+    if (!input) {
+        std::cerr << "Failed to open batch " << kind << " list: " << list_path << "\n";
+        return false;
+    }
+    const std::filesystem::path base = std::filesystem::absolute(list_path).parent_path();
+    std::string line;
+    int line_number = 0;
+    while (std::getline(input, line)) {
+        ++line_number;
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty() || line.front() == '#') continue;
+        const size_t tab = line.find('\t');
+        if (tab == std::string::npos) {
+            std::cerr << "Batch " << kind << " list line " << line_number
+                      << " must be <id><TAB><path>.\n";
+            return false;
+        }
+        BatchNamedPath row;
+        row.id = line.substr(0, tab);
+        row.path = std::filesystem::path(line.substr(tab + 1));
+        if (!IsSafeBatchId(row.id) || row.path.empty()) {
+            std::cerr << "Invalid batch " << kind << " list line " << line_number << ".\n";
+            return false;
+        }
+        if (row.path.is_relative()) row.path = base / row.path;
+        row.path = std::filesystem::absolute(row.path).lexically_normal();
+        if (!std::filesystem::exists(row.path)) {
+            std::cerr << "Batch " << kind << " path does not exist: " << row.path << "\n";
+            return false;
+        }
+        if (std::any_of(out.begin(), out.end(), [&](const BatchNamedPath& existing) {
+                return existing.id == row.id;
+            })) {
+            std::cerr << "Duplicate batch " << kind << " id: " << row.id << "\n";
+            return false;
+        }
+        out.push_back(std::move(row));
+    }
+    if (out.empty()) {
+        std::cerr << "Batch " << kind << " list is empty: " << list_path << "\n";
+        return false;
+    }
+    return true;
+}
+
+bool ReadTextFile(const std::filesystem::path& path, std::string& out) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) return false;
+    std::ostringstream buffer;
+    buffer << input.rdbuf();
+    out = buffer.str();
+    while (!out.empty() && (out.back() == '\r' || out.back() == '\n')) out.pop_back();
+    return !out.empty();
+}
+
+bool ParseBatchSeeds(const std::string& value, std::vector<int64_t>& out) {
+    std::istringstream input(value);
+    std::string part;
+    try {
+        while (std::getline(input, part, ',')) {
+            if (part.empty()) continue;
+            size_t consumed = 0;
+            const int64_t seed = std::stoll(part, &consumed);
+            if (consumed != part.size()) return false;
+            if (std::find(out.begin(), out.end(), seed) == out.end()) out.push_back(seed);
+        }
+    } catch (const std::exception&) {
+        return false;
+    }
+    return !out.empty();
+}
 
 bool ApplyProfile(const std::string& profile, TtsStreamOptions& options) {
     if (profile == "realtime") {
@@ -102,6 +194,8 @@ void PrintUsage() {
         << "  --async-streaming-decode | --no-async-streaming-decode\n"
         << "  --cache-instruction-tokens | --no-cache-instruction-tokens\n"
         << "  --instruction-cache-key <key> --repeat <n>\n"
+        << "  --batch-transcript-list <tsv> --batch-voice-list <tsv>\n"
+        << "  --batch-seeds <comma-list> --batch-output-dir <path>\n"
         << "  --simulate-stream-callback --dump-first-frame-profile --dump-streaming-overlap\n";
 }
 
@@ -122,6 +216,10 @@ int main(int argc, char** argv) {
     std::string text = "Hello. Welcome to Alfie's Bodega. I'm Alfie. What can I get for you today?";
     bool simulate_stream_callback = false;
     int repeat = 1;
+    std::string batch_transcript_list;
+    std::string batch_voice_list;
+    std::string batch_seeds_text;
+    std::string batch_output_dir;
 
     TtsStreamOptions options;
     options.output_wav = "examples/bridge_test.wav";
@@ -196,6 +294,10 @@ int main(int argc, char** argv) {
         else if (a == "--no-cache-instruction-tokens") options.cache_instruction_tokens = false;
         else if (a == "--instruction-cache-key") options.instruction_cache_key = next();
         else if (a == "--repeat") repeat = std::max(1, std::stoi(next()));
+        else if (a == "--batch-transcript-list") batch_transcript_list = next();
+        else if (a == "--batch-voice-list") batch_voice_list = next();
+        else if (a == "--batch-seeds") batch_seeds_text = next();
+        else if (a == "--batch-output-dir") batch_output_dir = next();
         else if (a == "--simulate-stream-callback") simulate_stream_callback = true;
         else if (a == "-h" || a == "--help") { PrintUsage(); return 0; }
         else {
@@ -208,12 +310,40 @@ int main(int argc, char** argv) {
         options.play_streaming = false;
     }
 
+    const bool batch_requested = !batch_transcript_list.empty()
+        || !batch_voice_list.empty()
+        || !batch_seeds_text.empty()
+        || !batch_output_dir.empty();
+    if (batch_requested && (batch_transcript_list.empty()
+        || batch_voice_list.empty()
+        || batch_seeds_text.empty()
+        || batch_output_dir.empty())) {
+        std::cerr << "Batch mode requires transcript list, voice list, seeds, and output directory.\n";
+        return 2;
+    }
+
+    std::vector<BatchNamedPath> batch_transcripts;
+    std::vector<BatchNamedPath> batch_voices;
+    std::vector<int64_t> batch_seeds;
+    if (batch_requested) {
+        if (!ReadBatchNamedPaths(batch_transcript_list, "transcript", batch_transcripts)) {
+            return 2;
+        }
+        if (!ReadBatchNamedPaths(batch_voice_list, "voice", batch_voices)) {
+            return 2;
+        }
+        if (!ParseBatchSeeds(batch_seeds_text, batch_seeds)) {
+            std::cerr << "Invalid or empty --batch-seeds value.\n";
+            return 2;
+        }
+    }
+
     Qwen3StreamingTts tts;
     if (!tts.load(model_dir, options.model_identifier)) {
         std::cerr << tts.last_error() << "\n";
         return 1;
     }
-    if (!speaker_embedding.empty() && !tts.load_speaker_embedding(speaker_embedding)) {
+    if (!batch_requested && !speaker_embedding.empty() && !tts.load_speaker_embedding(speaker_embedding)) {
         std::cerr << tts.last_error() << "\n";
         return 1;
     }
@@ -221,6 +351,58 @@ int main(int argc, char** argv) {
     TtsChunkCallback on_chunk;
     if (simulate_stream_callback) {
         on_chunk = [](const TtsStreamChunk&) { return true; };
+    }
+
+    if (batch_requested) {
+        const std::filesystem::path output_dir = std::filesystem::absolute(batch_output_dir);
+        std::error_code ec;
+        std::filesystem::create_directories(output_dir, ec);
+        if (ec) {
+            std::cerr << "Failed to create batch output directory: " << ec.message() << "\n";
+            return 1;
+        }
+        std::ofstream index(output_dir / "batch_results.tsv", std::ios::trunc);
+        if (!index) {
+            std::cerr << "Failed to create batch result index.\n";
+            return 1;
+        }
+        index << "transcript_id\tvoice_id\tseed\toutput_wav\n";
+        const size_t total = batch_transcripts.size() * batch_voices.size() * batch_seeds.size();
+        size_t completed = 0;
+        for (const BatchNamedPath& voice : batch_voices) {
+            if (!tts.load_speaker_embedding(voice.path.string())) {
+                std::cerr << tts.last_error() << "\n";
+                return 1;
+            }
+            for (const BatchNamedPath& transcript : batch_transcripts) {
+                std::string batch_text;
+                if (!ReadTextFile(transcript.path, batch_text)) {
+                    std::cerr << "Failed to read batch transcript: " << transcript.path << "\n";
+                    return 1;
+                }
+                for (const int64_t seed : batch_seeds) {
+                    TtsStreamOptions run_options = options;
+                    run_options.seed = seed;
+                    const std::string filename = transcript.id + "__" + voice.id
+                        + "__seed_" + std::to_string(seed) + ".wav";
+                    run_options.output_wav = (output_dir / filename).string();
+                    std::cout << "[batch] " << (completed + 1) << "/" << total
+                              << " transcript=" << transcript.id
+                              << " voice=" << voice.id
+                              << " seed=" << seed << "\n";
+                    if (!tts.synthesize_streaming(batch_text, run_options, on_chunk)) {
+                        std::cerr << tts.last_error() << "\n";
+                        return 1;
+                    }
+                    index << transcript.id << '\t' << voice.id << '\t' << seed
+                          << '\t' << filename << '\n';
+                    index.flush();
+                    ++completed;
+                }
+            }
+        }
+        std::cout << "[batch] completed " << completed << " utterances\n";
+        return 0;
     }
 
     const std::filesystem::path base_output = options.output_wav;

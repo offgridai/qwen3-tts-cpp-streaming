@@ -66,6 +66,28 @@ build-ninja-cuda\apps\streaming_cli\qwen3_streaming_cli.exe `
 
 Use `--no-play-streaming --simulate-stream-callback` for a silent callback-path run. On Windows, streaming CLI diagnostics go to stdout, so `2>&1` is unnecessary when piping to `Tee-Object`.
 
+### Persistent batch synthesis
+
+The streaming CLI can load the model once and synthesize the Cartesian product
+of transcript files, voice-clone JSONs, and seeds. Transcript and voice lists
+are tab-separated `<id><TAB><path>` files; IDs may contain letters, digits,
+underscores, and hyphens. Relative paths are resolved from the list file.
+
+```powershell
+build-ninja-cuda\apps\streaming_cli\qwen3_streaming_cli.exe `
+  -m models `
+  --model-identifier qwen3-tts-0.6b-f16 `
+  --batch-transcript-list batch\transcripts.tsv `
+  --batch-voice-list batch\voices.tsv `
+  --batch-seeds 41,42,43 `
+  --batch-output-dir batch\wav `
+  --no-play-streaming --simulate-stream-callback --quiet-all
+```
+
+Outputs are named `<transcript-id>__<voice-id>__seed_<seed>.wav`. A
+`batch_results.tsv` index is written alongside them. The model remains loaded
+for the entire batch, while each voice embedding is loaded once per voice.
+
 ## Build options and outputs
 
 `QWEN3_TTS_BUILD_STREAMING_WRAPPER=OFF` omits the integration library and its CLI. `QWEN3_TTS_BUILD_STREAMING_CLI=OFF` builds the library without the harness.
