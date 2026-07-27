@@ -97,11 +97,12 @@ The integration path is controlled by `QWEN3_TTS_BUILD_STREAMING_WRAPPER`; its C
 ## CUDA deployment
 
 Normal CUDA builds use the `portable` architecture policy. CUDA 12.8 or newer
-emits Ada `sm_89` cubin and PTX for RTX 4090-class GPUs together with native
-Blackwell `sm_120a` cubin for RTX 5090-class GPUs. CUDA 11.8 through 12.7 emits
-the Ada target only. `QWEN3_TTS_CUDA_ARCHITECTURES=native` is available for
-faster local compilation, and an explicit CMake architecture list can be used
-for controlled packaging.
+emits native Turing `sm_75`, Ada `sm_89`, and Blackwell `sm_120a` code, plus
+Ada PTX. CUDA 11.8 through 12.7 omits only Blackwell. The `turing` policy emits
+`sm_75` code and forces GGML's MMQ fallback for GTX 16-series devices without
+tensor cores. `QWEN3_TTS_CUDA_ARCHITECTURES=native` remains available for fast
+local compilation, and an explicit CMake architecture list can be used for
+controlled packaging.
 
 On Windows, the current GGML runtime DLLs are copied beside each CLI after it
 links. This copy is a target dependency so rebuilding GGML cannot leave an

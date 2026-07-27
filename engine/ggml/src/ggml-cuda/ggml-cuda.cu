@@ -273,6 +273,12 @@ static ggml_cuda_device_info ggml_cuda_init() {
         info.devices[id].cc = 100*prop.major + 10*prop.minor;
         GGML_LOG_INFO("  Device %d: %s, compute capability %d.%d, VMM: %s\n",
                         id, prop.name, prop.major, prop.minor, device_vmm ? "yes" : "no");
+        if (ggml_cuda_highest_compiled_arch(info.devices[id].cc) < 0) {
+            GGML_LOG_ERROR(
+                "  Device %d is not supported by this binary: no CUDA code compatible with sm_%d%d was compiled. "
+                "Rebuild with QWEN3_TTS_CUDA_ARCHITECTURES=%d%d (75 for GTX 16-series).\n",
+                id, prop.major, prop.minor, prop.major, prop.minor);
+        }
         std::string device_name(prop.name);
         if (device_name == "NVIDIA GeForce MX450") {
             turing_devices_without_mma.push_back({ id, device_name });
@@ -299,8 +305,12 @@ static ggml_cuda_device_info ggml_cuda_init() {
             GGML_LOG_INFO(
                 "  Device %d: %s\n", turing_devices_without_mma[device_pos].first, turing_devices_without_mma[device_pos].second.c_str());
         }
+#ifdef GGML_CUDA_FORCE_MMQ
+        GGML_LOG_INFO("GGML_CUDA_FORCE_MMQ is enabled for these tensor-core-free Turing devices.\n");
+#else
         GGML_LOG_INFO(
-            "Consider compiling with CMAKE_CUDA_ARCHITECTURES=61-virtual;80-virtual and DGGML_CUDA_FORCE_MMQ to force the use of the Pascal code for Turing.\n");
+            "For quantized models, use QWEN3_TTS_CUDA_ARCHITECTURES=turing to enable the MMQ fallback.\n");
+#endif
     }
 
     for (int id = 0; id < info.device_count; ++id) {

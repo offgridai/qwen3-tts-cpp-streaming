@@ -35,16 +35,15 @@ set(QWEN3_TTS_GGML_BUILD_DIR "${QWEN3_TTS_GGML_DIR}/build" CACHE PATH "Path to p
 
 option(QWEN3_TTS_CUDA "Enable CUDA backend via GGML" OFF)
 set(QWEN3_TTS_CUDA_ARCHITECTURES "portable" CACHE STRING
-    "CUDA targets: portable, native, or a CMake architecture list such as 89;120a-real")
-set_property(CACHE QWEN3_TTS_CUDA_ARCHITECTURES PROPERTY STRINGS portable native)
+    "CUDA targets: portable, turing, native, or a CMake architecture list such as 75-real;89;120a-real")
+set_property(CACHE QWEN3_TTS_CUDA_ARCHITECTURES PROPERTY STRINGS portable turing native)
 if(QWEN3_TTS_CUDA)
     set(GGML_CUDA ON CACHE BOOL "Enable GGML CUDA backend" FORCE)
 
     # GGML otherwise defaults to the GPU present at build time. That produces a
-    # single-architecture DLL which cannot be redistributed between Ada (RTX
-    # 40-series) and Blackwell (RTX 50-series) machines. Keep an explicit native
-    # mode for quick local builds, but make normal builds portable across the two
-    # generations this project actively supports.
+    # single-architecture DLL which cannot be redistributed across Turing GTX
+    # 16-series, Ada RTX 40-series, and Blackwell RTX 50-series machines. Keep an
+    # explicit native mode for quick local builds, but make normal builds portable.
     if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
         find_package(CUDAToolkit REQUIRED)
 
@@ -54,20 +53,26 @@ if(QWEN3_TTS_CUDA)
                     "The portable CUDA build requires CUDA 11.8 or newer for RTX 4090 (sm_89) support.")
             endif()
 
-            # No suffix emits both native cubin and forward-compatible PTX for
-            # Ada. Blackwell's architecture-specific target requires CUDA 12.8.
-            set(_qwen3_cuda_architectures 89)
+            # Ship native Turing code for GTX 16-series cards. Ada includes PTX
+            # for forward compatibility; Blackwell's target requires CUDA 12.8.
+            set(_qwen3_cuda_architectures 75-real 89)
             if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "12.8")
                 list(APPEND _qwen3_cuda_architectures 120a-real)
             endif()
             set(CMAKE_CUDA_ARCHITECTURES "${_qwen3_cuda_architectures}")
+        elseif(QWEN3_TTS_CUDA_ARCHITECTURES STREQUAL "turing")
+            # GTX 16-series Turing GPUs omit tensor cores. Force GGML's integer
+            # MMQ kernels for quantized weights instead of its tensor-core path.
+            set(CMAKE_CUDA_ARCHITECTURES 75)
+            set(GGML_CUDA_FORCE_MMQ ON CACHE BOOL
+                "Use MMQ kernels on Turing GPUs without tensor cores" FORCE)
         elseif(QWEN3_TTS_CUDA_ARCHITECTURES STREQUAL "native")
             set(CMAKE_CUDA_ARCHITECTURES native)
         elseif(QWEN3_TTS_CUDA_ARCHITECTURES)
             set(CMAKE_CUDA_ARCHITECTURES "${QWEN3_TTS_CUDA_ARCHITECTURES}")
         else()
             message(FATAL_ERROR
-                "QWEN3_TTS_CUDA_ARCHITECTURES must be portable, native, or a CMake architecture list.")
+                "QWEN3_TTS_CUDA_ARCHITECTURES must be portable, turing, native, or a CMake architecture list.")
         endif()
     endif()
 

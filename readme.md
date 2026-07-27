@@ -12,8 +12,8 @@ Native Qwen3-TTS inference in C++17 with GGML and optional CUDA acceleration. Th
 - Ninja and the CUDA Toolkit for the recommended Windows GPU build
 - Python 3 for model preparation and benchmark utilities
 
-CUDA 11.8 or newer is required for RTX 4090 builds. CUDA 12.8 or newer is
-recommended for distributable builds that also contain native RTX 5090 kernels.
+CUDA 11.8 or newer is required for the default portable build. CUDA 12.8 or
+newer is recommended so it also contains native RTX 5090 kernels.
 
 Run the following commands from a Visual Studio Developer PowerShell in the repository root.
 
@@ -140,9 +140,28 @@ Generated `ggml*.dll` files must be beside the executable or available on `PATH`
 ### CUDA GPU compatibility
 
 `portable` is the default CUDA architecture policy. With CUDA 12.8 or newer it
-builds native kernels for both RTX 4090-class Ada GPUs (`sm_89`) and RTX
-5090-class Blackwell GPUs (`sm_120a`), plus Ada PTX. With CUDA 11.8 through
-12.7 it builds the Ada target only.
+builds native kernels for GTX 16-series Turing (`sm_75`), RTX 4090-class Ada
+(`sm_89`), and RTX 5090-class Blackwell (`sm_120a`) GPUs, plus Ada PTX. With
+CUDA 11.8 through 12.7 it omits only the Blackwell target.
+
+For a smaller GTX 16-series build, use the `turing` policy. It targets `sm_75`
+and enables GGML's MMQ kernels because these cards do not have tensor cores:
+
+```powershell
+cmake -S . -B build-ninja-turing -G Ninja `
+  -DQWEN3_TTS_COREML=OFF `
+  -DQWEN3_TTS_EMBED_GGML=ON `
+  -DQWEN3_TTS_CUDA=ON `
+  -DQWEN3_TTS_CUDA_ARCHITECTURES=turing `
+  -DGGML_CUDA=ON `
+  -DGGML_CUDA_GRAPHS=ON
+cmake --build build-ninja-turing --target qwen3_streaming_cli
+```
+
+GTX 1660 cards generally have 6 GiB VRAM. Prefer a quantized 1.7B model and
+set `QWEN3_TTS_LOW_MEM=1` if normal loading exhausts VRAM. As a driver-specific
+fallback only, rebuild with `-DGGML_CUDA_NO_VMM=ON` if allocation through CUDA
+virtual memory fails.
 
 Use a native-only build to reduce compilation time while iterating on one
 machine:
@@ -154,11 +173,28 @@ cmake -S . -B build-ninja-native -G Ninja `
 ```
 
 An explicit CMake architecture list is also accepted. Release artifacts meant
-for both GPU generations should be built with CUDA 12.8 or newer and
+for all supported GPU generations should be built with CUDA 12.8 or newer and
 `portable`; do not redistribute a `native` build from an RTX 5090 as an RTX
-4090-compatible binary. The RTX 4090 target is compile-validated, but current
-performance measurements were collected on an RTX 5090; a physical RTX 4090
-acceptance run remains outstanding.
+4090- or GTX 1660-compatible binary. The Turing and RTX 4090 targets are
+compile-validated, but current performance measurements were collected on an
+RTX 5090; physical acceptance runs remain outstanding.
+
+### Quantized 1.7B models
+
+The bundled quantizer can derive Q4_K and Q5_K models from any converted F16
+GGUF. After building `tts_engine_quantize`, generate both variants of the 1.7B
+Base model with:
+
+```powershell
+py -3 tools\quantize_models.py models\qwen3-tts-1.7b-base-f16.gguf
+```
+
+The outputs are `models\qwen3-tts-1.7b-base-q4_k.gguf` and
+`models\qwen3-tts-1.7b-base-q5_k.gguf`. Pass a CustomVoice or VoiceDesign F16
+GGUF instead to create the corresponding variants. Q4_K uses less memory;
+Q5_K retains more weight precision. The current Base conversion is about 1.59
+GiB in Q4_K and 1.77 GiB in Q5_K. Model binaries remain ignored by Git, so this
+command is the reproducible source of these local artifacts.
 
 ## Streaming integration library
 
