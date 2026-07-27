@@ -235,6 +235,51 @@ bool Qwen3TTS::prime_streaming_runtime(bool include_steady_decode, bool print_ti
     return true;
 }
 
+bool Qwen3TTS::decode_audio_codes_batch(
+    const std::vector<std::vector<int32_t>> & code_batches,
+    std::vector<std::vector<float>> & audio_batches) {
+    error_msg_.clear();
+    audio_batches.clear();
+    if (!models_loaded_) {
+        error_msg_ = "Models are not loaded";
+        return false;
+    }
+    if (code_batches.empty()) {
+        error_msg_ = "Audio-code batch is empty";
+        return false;
+    }
+    if (!decoder_loaded_) {
+        if (decoder_model_path_.empty() || !audio_decoder_.load_model(decoder_model_path_)) {
+            error_msg_ = "Failed to load vocoder: " + audio_decoder_.get_error();
+            return false;
+        }
+        decoder_loaded_ = true;
+    }
+
+    const int32_t n_codebooks = audio_decoder_.get_config().n_codebooks;
+    if (n_codebooks <= 0 || code_batches.front().empty()
+        || code_batches.front().size() % (size_t) n_codebooks != 0) {
+        error_msg_ = "Invalid audio-code shape";
+        return false;
+    }
+    const int32_t n_frames = (int32_t) (code_batches.front().size() / (size_t) n_codebooks);
+    std::vector<int32_t> packed;
+    packed.reserve(code_batches.front().size() * code_batches.size());
+    for (const auto & codes : code_batches) {
+        if (codes.size() != code_batches.front().size()) {
+            error_msg_ = "Physical vocoder batches require equal frame counts";
+            return false;
+        }
+        packed.insert(packed.end(), codes.begin(), codes.end());
+    }
+    if (!audio_decoder_.decode_batch(packed.data(), n_frames,
+                                     (int32_t) code_batches.size(), audio_batches)) {
+        error_msg_ = "Failed to decode audio-code batch: " + audio_decoder_.get_error();
+        return false;
+    }
+    return true;
+}
+
 std::vector<std::string> Qwen3TTS::get_available_speakers() const {
     std::vector<std::string> speakers;
     const auto & speaker_map = transformer_.get_config().speaker_id_map;

@@ -25,6 +25,11 @@ int main() {
     Qwen3StreamingTts original;
     if (!require(!original.is_loaded(), "new wrapper must not report a loaded model")) return 1;
     if (!require(!original.capabilities().loaded, "new wrapper capabilities must report unloaded")) return 1;
+    std::vector<std::vector<float>> batch_audio;
+    if (!require(!original.decode_audio_codes_batch({}, batch_audio),
+                 "batch decode without a loaded model must fail")) return 1;
+    if (!require(!original.last_error().empty(),
+                 "failed batch decode must populate last_error")) return 1;
     if (!require(!original.load("__qwen3_missing_model_directory__"), "invalid model directory must fail")) return 1;
     if (!require(!original.last_error().empty(), "failed load must populate last_error")) return 1;
 

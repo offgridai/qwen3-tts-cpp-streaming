@@ -56,6 +56,13 @@ The first decode is queued when the first-window frame count is available. Later
 
 With asynchronous decode enabled, one worker processes vocoder jobs while generation continues producing codes. The final job uses the configured final context and marks the final PCM callback.
 
+Offline physical batching is a separate, opt-in path. Requests generate codec
+frames sequentially, then equal-frame-count sequences are packed into one
+decoder graph with a real batch dimension. This batches the pre-transformer,
+upsampling, convolution, and Code2Wav work without duplicating model instances.
+It does not batch the autoregressive talker, so it improves aggregate offline
+throughput rather than time to first audio. Batch size one remains the default.
+
 Default engine and wrapper values:
 
 ```text

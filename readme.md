@@ -87,6 +87,30 @@ build-ninja-cuda\apps\streaming_cli\qwen3_streaming_cli.exe `
 Outputs are named `<transcript-id>__<voice-id>__seed_<seed>.wav`. A
 `batch_results.tsv` index is written alongside them. The model remains loaded
 for the entire batch, while each voice embedding is loaded once per voice.
+This default path processes one request at a time and preserves normal
+streaming behavior.
+
+For offline throughput, opt into physical vocoder batching:
+
+```powershell
+build-ninja-cuda\apps\streaming_cli\qwen3_streaming_cli.exe `
+  -m models `
+  --model-identifier qwen3-tts-0.6b-f16 `
+  --batch-job-list batch\jobs.tsv `
+  --batch-output-dir batch\wav `
+  --vocoder-batch-size 2 `
+  --quiet-all
+```
+
+Autoregressive code generation remains sequential. Equal-frame-count results
+are grouped automatically and decoded in one physical vocoder graph; unmatched
+lengths fall back to smaller groups. The option defaults to `1`, so ordinary
+streaming latency and output are unchanged. On an RTX 5090, a two-item,
+45-frame decoder probes took 516-553 ms versus 684-687 ms serial (1.24-1.33x
+vocoder throughput); short nine-frame probes took 175-182 ms versus 386-390 ms
+(2.14-2.21x).
+Batched floating-point scheduling is not bit-identical to serial decoding; the
+45-frame probe measured waveform RMSE 0.0025 and maximum sample delta 0.122.
 
 For exact per-utterance assignments, use `--batch-job-list <tsv>` instead of
 the three Cartesian inputs. Each non-comment row has five tab-separated fields:
@@ -172,6 +196,8 @@ The wrapper:
 - supports callback-only or callback-plus-WAV operation;
 - exposes language IDs, named speakers, speaker embeddings, VoiceDesign instructions, sampling, and streaming controls;
 - reports failures through `last_error()` and does not own application playback buffering.
+- exposes deferred codec generation and equal-length physical vocoder decode
+  for applications that explicitly prefer offline throughput over minimum latency.
 
 ## Streaming profiles
 
@@ -262,6 +288,13 @@ py -3 tools\acceptance.py
 ```
 
 Run `py -3 tools\acceptance.py --full` for the six-case, six-seed reliability corpus. Model-backed checks are not registered with CTest by default; configure with `-DQWEN3_TTS_ENABLE_MODEL_TESTS=ON` when that behavior is desirable for a dedicated machine.
+
+Run the physical vocoder equivalence/performance probe directly with:
+
+```powershell
+build-ninja-cuda\tests\qwen3_decoder_batch_test.exe `
+  models\qwen3-tts-tokenizer-f16.gguf 45
+```
 
 ## Runtime controls
 

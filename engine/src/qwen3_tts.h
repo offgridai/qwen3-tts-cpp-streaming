@@ -68,6 +68,10 @@ struct tts_params {
     // Interleave generation with tail-context vocoder decode. The full WAV-compatible
     // result remains available while optional callbacks receive incremental PCM.
     bool streaming_generate = true;
+
+    // Offline batching hook: generate codec frames but leave vocoder decode to
+    // decode_audio_codes_batch(). Ignored when streaming_generate is true.
+    bool defer_audio_decode = false;
     int32_t first_tail_window_frames = 3;
     // After the first window, optionally use a few smaller ramp windows before
     // settling into the steady-state size. This reduces early burstiness while
@@ -128,6 +132,10 @@ struct tts_params {
 struct tts_result {
     // Generated audio samples (24kHz, mono)
     std::vector<float> audio;
+
+    // Populated when defer_audio_decode is enabled. Layout is
+    // [generated_audio_tokens, n_codebooks].
+    std::vector<int32_t> audio_codes;
     
     // Sample rate
     int32_t sample_rate = 24000;
@@ -241,6 +249,12 @@ public:
 
     // Open and retain the Windows streaming playback device before synthesis.
     bool prepare_streaming_playback();
+
+    // Decode an equal-frame-count physical batch of codec sequences. This is
+    // an opt-in offline throughput path; ordinary and streaming synthesis are
+    // unchanged. Each input uses [n_frames, n_codebooks] layout.
+    bool decode_audio_codes_batch(const std::vector<std::vector<int32_t>> & code_batches,
+                                  std::vector<std::vector<float>> & audio_batches);
     
 private:
     friend struct pipeline_internal::ops;

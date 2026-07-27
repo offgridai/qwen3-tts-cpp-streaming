@@ -90,6 +90,17 @@ public:
                               const TtsStreamOptions& options,
                               TtsChunkCallback on_chunk = {});
 
+    // Offline physical-batch hooks. Generation remains sequential; equal-size
+    // codec sequences can then share one vocoder graph execution.
+    bool generate_audio_codes(const std::string& text,
+                              const TtsStreamOptions& options,
+                              std::vector<int32_t>& codes,
+                              int32_t& frame_count);
+    bool decode_audio_codes_batch(const std::vector<std::vector<int32_t>>& code_batches,
+                                  std::vector<std::vector<float>>& audio_batches);
+    bool save_audio(const std::string& path, const std::vector<float>& audio,
+                    int32_t sample_rate = 24000);
+
     bool is_loaded() const;
     const TtsModelCapabilities& capabilities() const;
     const std::string& last_error() const;

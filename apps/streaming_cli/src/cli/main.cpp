@@ -2,11 +2,13 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -275,6 +277,7 @@ void PrintUsage() {
         << "  --batch-transcript-list <tsv> --batch-voice-list <tsv>\n"
         << "  --batch-seeds <comma-list> --batch-output-dir <path>\n"
         << "  --batch-job-list <tsv> --batch-output-dir <path>\n"
+        << "  --vocoder-batch-size <n> (offline batch mode only; default 1)\n"
         << "  --simulate-stream-callback --dump-first-frame-profile --dump-streaming-overlap\n";
 }
 
@@ -300,6 +303,7 @@ int main(int argc, char** argv) {
     std::string batch_seeds_text;
     std::string batch_output_dir;
     std::string batch_job_list;
+    int vocoder_batch_size = 1;
 
     TtsStreamOptions options;
     options.output_wav = "examples/bridge_test.wav";
@@ -379,6 +383,7 @@ int main(int argc, char** argv) {
         else if (a == "--batch-seeds") batch_seeds_text = next();
         else if (a == "--batch-output-dir") batch_output_dir = next();
         else if (a == "--batch-job-list") batch_job_list = next();
+        else if (a == "--vocoder-batch-size") vocoder_batch_size = std::stoi(next());
         else if (a == "--simulate-stream-callback") simulate_stream_callback = true;
         else if (a == "-h" || a == "--help") { PrintUsage(); return 0; }
         else {
@@ -396,6 +401,14 @@ int main(int argc, char** argv) {
         || !batch_seeds_text.empty();
     const bool job_batch_requested = !batch_job_list.empty();
     const bool batch_requested = cartesian_batch_requested || job_batch_requested;
+    if (vocoder_batch_size < 1) {
+        std::cerr << "--vocoder-batch-size must be at least 1.\n";
+        return 2;
+    }
+    if (vocoder_batch_size > 1 && !batch_requested) {
+        std::cerr << "--vocoder-batch-size requires an offline batch input list.\n";
+        return 2;
+    }
     if (!batch_output_dir.empty() && !batch_requested) {
         std::cerr << "--batch-output-dir requires a batch input list.\n";
         return 2;
@@ -483,6 +496,104 @@ int main(int argc, char** argv) {
         std::filesystem::path loaded_voice_path;
         std::filesystem::path loaded_transcript_path;
         std::string batch_text;
+
+        if (vocoder_batch_size > 1) {
+            struct PendingDecode {
+                BatchJob job;
+                std::string filename;
+                std::vector<int32_t> codes;
+                int32_t frame_count = 0;
+            };
+            std::map<int32_t, std::vector<PendingDecode>> pending_by_frames;
+            size_t generated = 0;
+
+            auto flush = [&](std::vector<PendingDecode>& pending, size_t count) -> bool {
+                std::vector<std::vector<int32_t>> code_batches;
+                code_batches.reserve(count);
+                for (size_t i = 0; i < count; ++i) {
+                    code_batches.push_back(pending[i].codes);
+                }
+                const auto start = std::chrono::steady_clock::now();
+                std::vector<std::vector<float>> audio_batches;
+                if (!tts.decode_audio_codes_batch(code_batches, audio_batches)) {
+                    std::cerr << tts.last_error() << "\n";
+                    return false;
+                }
+                const auto decode_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - start).count();
+                if (audio_batches.size() != count) {
+                    std::cerr << "Vocoder batch returned the wrong output count.\n";
+                    return false;
+                }
+                for (size_t i = 0; i < count; ++i) {
+                    const auto output_path = output_dir / pending[i].filename;
+                    if (!tts.save_audio(output_path.string(), audio_batches[i])) {
+                        std::cerr << tts.last_error() << "\n";
+                        return false;
+                    }
+                    const BatchJob& job = pending[i].job;
+                    index << job.id << '\t' << job.transcript_id << '\t' << job.voice_id
+                          << '\t' << job.seed << '\t' << pending[i].filename << '\n';
+                    ++completed;
+                }
+                index.flush();
+                std::cout << "[vocoder-batch] size=" << count
+                          << " frames=" << pending.front().frame_count
+                          << " decode_ms=" << decode_ms << "\n";
+                pending.erase(pending.begin(), pending.begin() + (std::ptrdiff_t) count);
+                return true;
+            };
+
+            for (const BatchJob& job : batch_jobs) {
+                if (job.voice_path != loaded_voice_path) {
+                    if (!tts.load_speaker_embedding(job.voice_path.string())) {
+                        std::cerr << tts.last_error() << "\n";
+                        return 1;
+                    }
+                    loaded_voice_path = job.voice_path;
+                }
+                if (job.transcript_path != loaded_transcript_path) {
+                    if (!ReadTextFile(job.transcript_path, batch_text)) {
+                        std::cerr << "Failed to read batch transcript: " << job.transcript_path << "\n";
+                        return 1;
+                    }
+                    loaded_transcript_path = job.transcript_path;
+                }
+                TtsStreamOptions run_options = options;
+                run_options.seed = job.seed;
+                run_options.play_streaming = false;
+                run_options.output_wav.clear();
+                PendingDecode pending;
+                pending.job = job;
+                pending.filename = job.id + ".wav";
+                int32_t frame_count = 0;
+                std::cout << "[batch-generate] " << (generated + 1) << "/" << total
+                          << " job=" << job.id << " seed=" << job.seed << "\n";
+                if (!tts.generate_audio_codes(batch_text, run_options, pending.codes, frame_count)) {
+                    std::cerr << tts.last_error() << "\n";
+                    return 1;
+                }
+                ++generated;
+                pending.frame_count = frame_count;
+                auto& bucket = pending_by_frames[frame_count];
+                bucket.push_back(std::move(pending));
+                if (bucket.size() >= (size_t) vocoder_batch_size
+                    && !flush(bucket, (size_t) vocoder_batch_size)) {
+                    return 1;
+                }
+            }
+            for (auto& entry : pending_by_frames) {
+                auto& pending = entry.second;
+                while (!pending.empty()) {
+                    const size_t count = std::min(pending.size(), (size_t) vocoder_batch_size);
+                    if (!flush(pending, count)) return 1;
+                }
+            }
+            std::cout << "[batch] completed " << completed << " utterances"
+                      << " (vocoder batch size up to " << vocoder_batch_size << ")\n";
+            return 0;
+        }
+
         for (const BatchJob& job : batch_jobs) {
             if (job.voice_path != loaded_voice_path) {
                 if (!tts.load_speaker_embedding(job.voice_path.string())) {

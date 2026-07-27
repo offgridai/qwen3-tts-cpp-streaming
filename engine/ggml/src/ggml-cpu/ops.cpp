@@ -5993,10 +5993,12 @@ static void ggml_compute_forward_conv_transpose_1d_f16_f32(
             ggml_fp16_t * const wdata = (ggml_fp16_t *) params->wdata + nk;
             ggml_fp16_t * dst_data = wdata;
 
-            for (int64_t i11 = 0; i11 < ne11; i11++) {
-                const float * const src = (float *)((char *) src1->data + i11*nb11);
-                for (int64_t i10 = 0; i10 < ne10; i10++) {
-                    dst_data[i10*ne11 + i11] = GGML_CPU_FP32_TO_FP16(src[i10]);
+            for (int64_t i12 = 0; i12 < ne12; i12++) {
+                for (int64_t i11 = 0; i11 < ne11; i11++) {
+                    const float * const src = (float *)((char *) src1->data + i12*nb12 + i11*nb11);
+                    for (int64_t i10 = 0; i10 < ne10; i10++) {
+                        dst_data[(i12*ne10 + i10)*ne11 + i11] = GGML_CPU_FP32_TO_FP16(src[i10]);
+                    }
                 }
             }
         }
@@ -6009,7 +6011,7 @@ static void ggml_compute_forward_conv_transpose_1d_f16_f32(
     const int32_t s0 = ((const int32_t*)(dst->op_params))[0];
 
     // total rows in dst
-    const int nr = ne1;
+    const int nr = ne1*ne2;
 
     // rows per thread
     const int dr = (nr + nth - 1)/nth;
@@ -6021,15 +6023,18 @@ static void ggml_compute_forward_conv_transpose_1d_f16_f32(
     ggml_fp16_t * const wdata     = (ggml_fp16_t *) params->wdata + 0;
     ggml_fp16_t * const wdata_src = wdata + nk;
 
-    for (int i1 = ir0; i1 < ir1; i1++) {
-        float * dst_data = (float *)((char *) dst->data + i1*nb1);
+    for (int ir = ir0; ir < ir1; ir++) {
+        const int i2 = ir / ne1;
+        const int i1 = ir % ne1;
+        float * dst_data = (float *)((char *) dst->data + i2*nb2 + i1*nb1);
         ggml_fp16_t * wdata_kernel = wdata + i1*ne02*ne00;
+        ggml_fp16_t * batch_src = wdata_src + i2*ne10*ne11;
         for (int i10 = 0; i10 < ne10; i10++) {
             const int i1n = i10*ne11;
             for (int i00 = 0; i00 < ne00; i00++) {
                 float v = 0;
                 ggml_vec_dot_f16(ne02, &v, 0,
-                        (ggml_fp16_t *)    wdata_src + i1n, 0,
+                        (ggml_fp16_t *)    batch_src + i1n, 0,
                         (ggml_fp16_t *) wdata_kernel + i00*ne02, 0, 1);
                 dst_data[i10*s0 + i00] += v;
             }
@@ -6081,10 +6086,12 @@ static void ggml_compute_forward_conv_transpose_1d_f32(
             float * const wdata = (float *) params->wdata + nk;
             float * dst_data = wdata;
 
-            for (int64_t i11 = 0; i11 < ne11; i11++) {
-                const float * const src = (float *)((char *) src1->data + i11*nb11);
-                for (int64_t i10 = 0; i10 < ne10; i10++) {
-                    dst_data[i10*ne11 + i11] = src[i10];
+            for (int64_t i12 = 0; i12 < ne12; i12++) {
+                for (int64_t i11 = 0; i11 < ne11; i11++) {
+                    const float * const src = (float *)((char *) src1->data + i12*nb12 + i11*nb11);
+                    for (int64_t i10 = 0; i10 < ne10; i10++) {
+                        dst_data[(i12*ne10 + i10)*ne11 + i11] = src[i10];
+                    }
                 }
             }
         }
@@ -6097,7 +6104,7 @@ static void ggml_compute_forward_conv_transpose_1d_f32(
     const int32_t s0 = ((const int32_t*)(dst->op_params))[0];
 
     // total rows in dst
-    const int nr = ne1;
+    const int nr = ne1*ne2;
 
     // rows per thread
     const int dr = (nr + nth - 1)/nth;
@@ -6109,15 +6116,18 @@ static void ggml_compute_forward_conv_transpose_1d_f32(
     float * const wdata     = (float *) params->wdata + 0;
     float * const wdata_src = wdata + nk;
 
-    for (int i1 = ir0; i1 < ir1; i1++) {
-        float * dst_data = (float *)((char *) dst->data + i1*nb1);
+    for (int ir = ir0; ir < ir1; ir++) {
+        const int i2 = ir / ne1;
+        const int i1 = ir % ne1;
+        float * dst_data = (float *)((char *) dst->data + i2*nb2 + i1*nb1);
         float * wdata_kernel = wdata + i1*ne02*ne00;
+        float * batch_src = wdata_src + i2*ne10*ne11;
         for (int i10 = 0; i10 < ne10; i10++) {
             const int i1n = i10*ne11;
             for (int i00 = 0; i00 < ne00; i00++) {
                 float v = 0;
                 ggml_vec_dot_f32(ne02, &v, 0,
-                        wdata_src + i1n, 0,
+                        batch_src + i1n, 0,
                         wdata_kernel + i00*ne02, 0, 1);
                 dst_data[i10*s0 + i00] += v;
             }

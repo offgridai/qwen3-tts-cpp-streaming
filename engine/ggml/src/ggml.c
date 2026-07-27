@@ -4423,7 +4423,6 @@ struct ggml_tensor * ggml_im2col(
     } else {
         //GGML_ASSERT(b->ne[1] % a->ne[1] == 0);
         GGML_ASSERT(b->ne[1] == a->ne[1]);
-        GGML_ASSERT(b->ne[3] == 1);
     }
 
     const int64_t OH = is_2D ? ggml_calc_conv_output_size(b->ne[1], a->ne[1], s1, p1, d1) : 0;
@@ -4436,7 +4435,7 @@ struct ggml_tensor * ggml_im2col(
         is_2D ? (a->ne[2] * a->ne[1] * a->ne[0]) : a->ne[1] * a->ne[0],
         OW,
         is_2D ? OH : b->ne[2],
-        is_2D ?      b->ne[3] : 1,
+        b->ne[3],
     };
 
     struct ggml_tensor * result = ggml_new_tensor(ctx, dst_type, 4, ne);
@@ -4484,6 +4483,15 @@ struct ggml_tensor * ggml_conv_1d(
         int                   d0) {
     struct ggml_tensor * im2col = ggml_im2col(ctx, a, b, s0, 0, p0, 0, d0, 0, false, GGML_TYPE_F16); // [N, OL, IC * K]
 
+    if (b->ne[2] > 1) {
+        struct ggml_tensor * result = ggml_mul_mat(ctx,
+                ggml_reshape_2d(ctx, im2col, im2col->ne[0], im2col->ne[2] * im2col->ne[1]),
+                ggml_reshape_2d(ctx, a, (a->ne[0] * a->ne[1]), a->ne[2]));
+        result = ggml_reshape_3d(ctx, result, im2col->ne[1], im2col->ne[2], a->ne[2]);
+        result = ggml_cont(ctx, ggml_permute(ctx, result, 0, 2, 1, 3));
+        return result;
+    }
+
     struct ggml_tensor * result =
         ggml_mul_mat(ctx,
                 ggml_reshape_2d(ctx, im2col, im2col->ne[0], (im2col->ne[2] * im2col->ne[1])), // [N, OL, IC * K] => [N*OL, IC * K]
@@ -4518,9 +4526,18 @@ struct ggml_tensor * ggml_conv_1d_dw(
 
     struct ggml_tensor * im2col = ggml_im2col(ctx, a, new_b, s0, 0, p0, 0, d0, 0, false, GGML_TYPE_F16);
 
+    if (b->ne[2] > 1) {
+        struct ggml_tensor * flattened = ggml_reshape_3d(
+            ctx, im2col, im2col->ne[0], im2col->ne[1], im2col->ne[2] * im2col->ne[3]);
+        struct ggml_tensor * repeated = ggml_repeat(ctx, a, ggml_new_tensor_3d(
+            ctx, a->type, a->ne[0], a->ne[1], flattened->ne[2]));
+        struct ggml_tensor * result = ggml_mul_mat(ctx, flattened, repeated);
+        return ggml_reshape_3d(ctx, result, result->ne[0], b->ne[1], b->ne[2]);
+    }
+
     struct ggml_tensor * result = ggml_mul_mat(ctx, im2col, a);
 
-    result = ggml_reshape_3d(ctx, result, result->ne[0], result->ne[2], 1);
+    result = ggml_reshape_3d(ctx, result, result->ne[0], result->ne[2], result->ne[3]);
 
     return result;
 }
@@ -4549,7 +4566,7 @@ GGML_API struct ggml_tensor * ggml_conv_transpose_1d(
         int                   s0,
         int                   p0,
         int                   d0) {
-    GGML_ASSERT(ggml_is_matrix(b));
+    GGML_ASSERT(ggml_is_3d(b));
     GGML_ASSERT(a->ne[2] == b->ne[1]);
     GGML_ASSERT(a->ne[3] == 1);
 

@@ -121,6 +121,7 @@ struct audio_decoder_state {
     struct ggml_tensor * decode_positions_tensor = nullptr;
     struct ggml_tensor * decode_audio_tensor = nullptr;
     int32_t decode_graph_n_frames = 0;
+    int32_t decode_graph_batch_size = 0;
 };
 
 namespace decoder_internal {
@@ -140,13 +141,16 @@ enum class profile_stage {
 };
 
 struct ops {
-    static struct ggml_cgraph * build_graph(AudioTokenizerDecoder & self, int32_t n_frames);
+    static struct ggml_cgraph * build_graph(AudioTokenizerDecoder & self, int32_t n_frames,
+                                             int32_t batch_size = 1);
     static struct ggml_cgraph * build_graph_impl(AudioTokenizerDecoder & self,
                                                  int32_t n_frames,
+                                                 int32_t batch_size,
                                                  struct ggml_context ** graph_ctx_out,
                                                  profile_stage stop_stage = profile_stage::none);
     static void release_cached_decode_graph(AudioTokenizerDecoder & self);
-    static bool ensure_cached_decode_graph(AudioTokenizerDecoder & self, int32_t n_frames);
+    static bool ensure_cached_decode_graph(AudioTokenizerDecoder & self, int32_t n_frames,
+                                            int32_t batch_size);
     static struct ggml_tensor * apply_snake(struct ggml_context * ctx,
                                             struct ggml_tensor * x,
                                             struct ggml_tensor * alpha,
@@ -160,6 +164,7 @@ struct ops {
                                                     struct ggml_tensor * x,
                                                     const pre_tfm_layer & layer,
                                                     int32_t n_frames,
+                                                    int32_t batch_size,
                                                     struct ggml_tensor * positions);
     static struct ggml_tensor * apply_upsample_block(struct ggml_context * ctx,
                                                      struct ggml_tensor * x,

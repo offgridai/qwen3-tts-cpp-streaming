@@ -30,6 +30,7 @@ struct ggml_tensor * decoder_internal::ops::apply_pre_tfm_layer(struct ggml_cont
                                                                 struct ggml_tensor * x,
                                                                 const pre_tfm_layer & layer,
                                                                 int32_t n_frames,
+                                                                int32_t batch_size,
                                                                 struct ggml_tensor * positions) {
     const auto & cfg = self.impl_->model.config;
     const int n_heads = cfg.n_heads;
@@ -50,9 +51,9 @@ struct ggml_tensor * decoder_internal::ops::apply_pre_tfm_layer(struct ggml_cont
     struct ggml_tensor * Kcur = ggml_mul_mat(ctx, layer.attn_k_w, normed);
     struct ggml_tensor * Vcur = ggml_mul_mat(ctx, layer.attn_v_w, normed);
 
-    Qcur = ggml_reshape_3d(ctx, Qcur, head_dim, n_heads, n_frames);
-    Kcur = ggml_reshape_3d(ctx, Kcur, head_dim, n_heads, n_frames);
-    Vcur = ggml_reshape_3d(ctx, Vcur, head_dim, n_heads, n_frames);
+    Qcur = ggml_reshape_4d(ctx, Qcur, head_dim, n_heads, n_frames, batch_size);
+    Kcur = ggml_reshape_4d(ctx, Kcur, head_dim, n_heads, n_frames, batch_size);
+    Vcur = ggml_reshape_4d(ctx, Vcur, head_dim, n_heads, n_frames, batch_size);
 
     Qcur = ggml_rope_ext(ctx, Qcur, positions, nullptr,
                          head_dim, GGML_ROPE_TYPE_NEOX, 0,
@@ -75,7 +76,8 @@ struct ggml_tensor * decoder_internal::ops::apply_pre_tfm_layer(struct ggml_cont
 
     struct ggml_tensor * KQV = ggml_mul_mat(ctx, V, KQ);
     KQV = ggml_permute(ctx, KQV, 0, 2, 1, 3);
-    struct ggml_tensor * attn_out = ggml_cont_2d(ctx, KQV, n_heads * head_dim, n_frames);
+    struct ggml_tensor * attn_out = ggml_cont_3d(
+        ctx, KQV, n_heads * head_dim, n_frames, batch_size);
 
     attn_out = ggml_mul_mat(ctx, layer.attn_output_w, attn_out);
 
@@ -108,14 +110,13 @@ struct ggml_tensor * decoder_internal::ops::apply_upsample_block(struct ggml_con
                                                                  const upsample_block & block,
                                                                  int block_idx) {
     (void) block_idx;
-    int64_t seq_len = x->ne[0];
     int64_t channels = x->ne[1];
+    int64_t batch_size = x->ne[2];
 
-    struct ggml_tensor * x_2d = ggml_reshape_2d(ctx, x, seq_len, channels);
-    x_2d = ggml_conv_transpose_1d(ctx, block.conv_w, x_2d, 2, 0, 1);
+    struct ggml_tensor * x_2d = ggml_conv_transpose_1d(ctx, block.conv_w, x, 2, 0, 1);
 
     int64_t new_seq_len = x_2d->ne[0];
-    x = ggml_reshape_3d(ctx, x_2d, new_seq_len, channels, 1);
+    x = ggml_reshape_3d(ctx, x_2d, new_seq_len, channels, batch_size);
 
     if (block.conv_b) {
         x = ggml_add(ctx, x, ggml_reshape_3d(ctx, block.conv_b, 1, channels, 1));
@@ -205,23 +206,21 @@ struct ggml_tensor * decoder_internal::ops::apply_decoder_block(struct ggml_cont
         x = apply_snake(ctx, x, block.snake_alpha, block.snake_beta);
     }
 
-    int64_t seq_len = x->ne[0];
-    int64_t in_channels = x->ne[1];
+    int64_t batch_size = x->ne[2];
     int64_t out_channels = block.conv_t_w->ne[1];
     int kernel_size = block.conv_t_w->ne[0];
 
-    struct ggml_tensor * x_2d = ggml_reshape_2d(ctx, x, seq_len, in_channels);
-    x_2d = ggml_conv_transpose_1d(ctx, block.conv_t_w, x_2d, upsample_rate, 0, 1);
+    struct ggml_tensor * x_2d = ggml_conv_transpose_1d(ctx, block.conv_t_w, x, upsample_rate, 0, 1);
 
     int64_t new_seq_len = x_2d->ne[0];
-    x = ggml_reshape_3d(ctx, x_2d, new_seq_len, out_channels, 1);
+    x = ggml_reshape_3d(ctx, x_2d, new_seq_len, out_channels, batch_size);
 
     int pad = kernel_size - upsample_rate;
     int left_pad = pad;
     int right_pad = pad;
     int64_t out_seq_len = new_seq_len - left_pad - right_pad;
 
-    x = ggml_view_3d(ctx, x, out_seq_len, out_channels, 1,
+    x = ggml_view_3d(ctx, x, out_seq_len, out_channels, batch_size,
                      x->nb[1], x->nb[2], left_pad * x->nb[0]);
     x = ggml_cont(ctx, x);
 
