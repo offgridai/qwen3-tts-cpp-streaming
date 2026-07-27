@@ -2827,7 +2827,6 @@ struct ggml_cplan ggml_graph_plan(
                 case GGML_OP_CONV_TRANSPOSE_1D:
                     {
                         GGML_ASSERT(node->src[0]->ne[3] == 1);
-                        GGML_ASSERT(node->src[1]->ne[2] == 1);
                         GGML_ASSERT(node->src[1]->ne[3] == 1);
 
                         const int64_t ne00 = node->src[0]->ne[0];  // K
@@ -2840,11 +2839,11 @@ struct ggml_cplan ggml_graph_plan(
                              node->src[0]->type == GGML_TYPE_BF16) &&
                             node->src[1]->type == GGML_TYPE_F32) {
                             cur += sizeof(ggml_fp16_t)*ne00*ne01*ne02;
-                            cur += sizeof(ggml_fp16_t)*ne10*ne11;
+                            cur += sizeof(ggml_fp16_t)*ne10*ne11*node->src[1]->ne[2];
                         } else if (node->src[0]->type == GGML_TYPE_F32 &&
                                    node->src[1]->type == GGML_TYPE_F32) {
                             cur += sizeof(float)*ne00*ne01*ne02;
-                            cur += sizeof(float)*ne10*ne11;
+                            cur += sizeof(float)*ne10*ne11*node->src[1]->ne[2];
                         } else {
                             GGML_ABORT("fatal error");
                         }

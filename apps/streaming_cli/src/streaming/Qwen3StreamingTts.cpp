@@ -204,6 +204,102 @@ bool Qwen3StreamingTts::synthesize_streaming(
     return true;
 }
 
+bool Qwen3StreamingTts::generate_audio_codes(
+    const std::string& text,
+    const TtsStreamOptions& options,
+    std::vector<int32_t>& codes,
+    int32_t& frame_count)
+{
+    impl_->error.clear();
+    codes.clear();
+    frame_count = 0;
+    if (!impl_->engine.is_loaded()) {
+        impl_->error = "No model is loaded. Call load() before synthesis.";
+        return false;
+    }
+    const std::string requested_model = NormalizeModelName(options.model_identifier);
+    if (!requested_model.empty() && requested_model != impl_->loaded_model_name) {
+        if (!load(impl_->model_dir, requested_model)) {
+            return false;
+        }
+    }
+    const bool is_voice_design_model = impl_->caps.model_type == "voice_design";
+    if (options.voice_design && !is_voice_design_model) {
+        impl_->error = "Voice design was requested for model type '" + impl_->caps.model_type + "'.";
+        return false;
+    }
+    if (is_voice_design_model && options.instruction.empty()) {
+        impl_->error = "VoiceDesign requires a non-empty instruction.";
+        return false;
+    }
+    if (is_voice_design_model && !impl_->speaker_embedding.empty()) {
+        impl_->error = "VoiceDesign does not accept speaker embeddings.";
+        return false;
+    }
+
+    qwen3_tts::tts_params params;
+    params.print_progress = options.print_progress;
+    params.print_timing = options.print_timing;
+    params.max_audio_tokens = options.max_audio_tokens;
+    params.max_audio_frames_per_text_token = options.max_audio_frames_per_text_token;
+    params.min_dynamic_audio_tokens = options.min_dynamic_audio_tokens;
+    params.temperature = options.temperature;
+    params.top_k = options.top_k;
+    params.top_p = options.top_p;
+    params.cb0_top_p = options.cb0_top_p;
+    params.repetition_penalty = options.repetition_penalty;
+    params.seed = options.seed;
+    params.language_id = options.language_id;
+    params.speaker = options.speaker;
+    params.instruction = options.instruction;
+    params.cache_instruction_tokens = options.cache_instruction_tokens;
+    params.instruction_cache_key = options.instruction_cache_key;
+    params.streaming_generate = false;
+    params.defer_audio_decode = true;
+    params.play_streaming = false;
+
+    qwen3_tts::tts_result result;
+    if (!impl_->speaker_embedding.empty()) {
+        result = impl_->engine.synthesize_with_speaker_embedding(text, impl_->speaker_embedding, params);
+    } else {
+        result = impl_->engine.synthesize(text, params);
+    }
+    if (!result.success) {
+        impl_->error = "Code generation failed: " + result.error_msg;
+        return false;
+    }
+    codes = std::move(result.audio_codes);
+    frame_count = result.generated_audio_tokens;
+    if (codes.empty() || frame_count <= 0) {
+        impl_->error = "Code generation returned no audio frames.";
+        return false;
+    }
+    return true;
+}
+
+bool Qwen3StreamingTts::decode_audio_codes_batch(
+    const std::vector<std::vector<int32_t>>& code_batches,
+    std::vector<std::vector<float>>& audio_batches)
+{
+    impl_->error.clear();
+    if (!impl_->engine.decode_audio_codes_batch(code_batches, audio_batches)) {
+        impl_->error = impl_->engine.get_error();
+        return false;
+    }
+    return true;
+}
+
+bool Qwen3StreamingTts::save_audio(const std::string& path,
+                                   const std::vector<float>& audio,
+                                   int32_t sample_rate) {
+    impl_->error.clear();
+    if (!qwen3_tts::save_audio_file(path, audio, sample_rate)) {
+        impl_->error = "Failed to write output WAV: " + path;
+        return false;
+    }
+    return true;
+}
+
 bool Qwen3StreamingTts::is_loaded() const {
     return impl_->engine.is_loaded();
 }

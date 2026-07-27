@@ -1679,31 +1679,36 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
             sample_memory("synth/after-transformer-unload");
         }
 
-        t_decode_start = get_time_ms();
-        if (!self.decoder_loaded_) {
-            int64_t t_decoder_load_start = get_time_ms();
-            if (self.decoder_model_path_.empty()) {
-                result.error_msg = "Internal error: missing vocoder model path";
-                return result;
-            }
-            if (!self.audio_decoder_.load_model(self.decoder_model_path_)) {
-                result.error_msg = "Failed to load vocoder: " + self.audio_decoder_.get_error();
-                return result;
-            }
-            self.decoder_loaded_ = true;
-            if (params.print_timing) {
-                fprintf(stderr, "  Vocoder lazy-loaded in %lld ms\n",
-                        (long long) (get_time_ms() - t_decoder_load_start));
-                sample_memory("synth/after-vocoder-load");
-            }
-        }
+        if (params.defer_audio_decode) {
+            result.audio_codes = std::move(speech_codes);
+        } else {
 
-        if (!self.audio_decoder_.decode(speech_codes.data(), n_frames, result.audio)) {
-            result.error_msg = "Failed to decode speech codes: " + self.audio_decoder_.get_error();
-            return result;
+            t_decode_start = get_time_ms();
+            if (!self.decoder_loaded_) {
+                int64_t t_decoder_load_start = get_time_ms();
+                if (self.decoder_model_path_.empty()) {
+                    result.error_msg = "Internal error: missing vocoder model path";
+                    return result;
+                }
+                if (!self.audio_decoder_.load_model(self.decoder_model_path_)) {
+                    result.error_msg = "Failed to load vocoder: " + self.audio_decoder_.get_error();
+                    return result;
+                }
+                self.decoder_loaded_ = true;
+                if (params.print_timing) {
+                    fprintf(stderr, "  Vocoder lazy-loaded in %lld ms\n",
+                            (long long) (get_time_ms() - t_decoder_load_start));
+                    sample_memory("synth/after-vocoder-load");
+                }
+            }
+
+            if (!self.audio_decoder_.decode(speech_codes.data(), n_frames, result.audio)) {
+                result.error_msg = "Failed to decode speech codes: " + self.audio_decoder_.get_error();
+                return result;
+            }
+            result.t_decode_ms = get_time_ms() - t_decode_start;
+            sample_memory("synth/after-decode");
         }
-        result.t_decode_ms = get_time_ms() - t_decode_start;
-        sample_memory("synth/after-decode");
     }
 
     if (self.low_mem_mode_) {

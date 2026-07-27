@@ -1,6 +1,7 @@
 #include "audio_tokenizer_decoder.h"
 #include "decoder/decoder_state_internal.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <cstdio>
@@ -9,6 +10,17 @@ namespace qwen3_tts {
 
 bool AudioTokenizerDecoder::decode(const int32_t * codes, int32_t n_frames,
                                     std::vector<float> & samples) {
+    std::vector<std::vector<float>> batch_samples;
+    if (!decode_batch(codes, n_frames, 1, batch_samples)) {
+        return false;
+    }
+    samples = std::move(batch_samples.front());
+    return true;
+}
+
+bool AudioTokenizerDecoder::decode_batch(const int32_t * codes, int32_t n_frames,
+                                         int32_t batch_size,
+                                         std::vector<std::vector<float>> & samples) {
     using profile_clock = std::chrono::steady_clock;
     const bool profile = std::getenv("QWEN3_TTS_PROFILE_DECODER") != nullptr;
     const auto t_start = profile_clock::now();
@@ -22,10 +34,14 @@ bool AudioTokenizerDecoder::decode(const int32_t * codes, int32_t n_frames,
         error_msg = "Model not loaded";
         return false;
     }
+    if (!codes || n_frames <= 0 || batch_size <= 0) {
+        error_msg = "Invalid batched decoder input";
+        return false;
+    }
 
     const auto & cfg = model.config;
 
-    if (!decoder_internal::ops::ensure_cached_decode_graph(*this, n_frames)) {
+    if (!decoder_internal::ops::ensure_cached_decode_graph(*this, n_frames, batch_size)) {
         return false;
     }
     const auto t_graph = profile_clock::now();
@@ -42,19 +58,22 @@ bool AudioTokenizerDecoder::decode(const int32_t * codes, int32_t n_frames,
         codebook_input_bufs.assign(cfg.n_codebooks, {});
     }
     for (int cb = 0; cb < cfg.n_codebooks; ++cb) {
-        codebook_input_bufs[cb].resize(n_frames);
+        codebook_input_bufs[cb].resize((size_t) n_frames * batch_size);
     }
 
-    for (int f = 0; f < n_frames; ++f) {
-        const int32_t * frame_codes = codes + (size_t) f * cfg.n_codebooks;
-        for (int cb = 0; cb < cfg.n_codebooks; ++cb) {
-            codebook_input_bufs[cb][f] = frame_codes[cb];
+    for (int b = 0; b < batch_size; ++b) {
+        for (int f = 0; f < n_frames; ++f) {
+            const int32_t * frame_codes = codes
+                + ((size_t) b * n_frames + f) * cfg.n_codebooks;
+            for (int cb = 0; cb < cfg.n_codebooks; ++cb) {
+                codebook_input_bufs[cb][(size_t) b * n_frames + f] = frame_codes[cb];
+            }
         }
     }
 
     for (int cb = 0; cb < cfg.n_codebooks; ++cb) {
         ggml_backend_tensor_set(state.decode_code_tensors[cb], codebook_input_bufs[cb].data(), 0,
-                                (size_t) n_frames * sizeof(int32_t));
+                                (size_t) n_frames * batch_size * sizeof(int32_t));
     }
 
     if ((int32_t) positions_buf.size() != n_frames) {
@@ -83,9 +102,13 @@ bool AudioTokenizerDecoder::decode(const int32_t * codes, int32_t n_frames,
         return false;
     }
 
-    int64_t n_samples = audio_tensor->ne[0];
-    samples.resize(n_samples);
-    ggml_backend_tensor_get(audio_tensor, samples.data(), 0, n_samples * sizeof(float));
+    const int64_t n_samples = ggml_nelements(audio_tensor) / batch_size;
+    std::vector<float> packed((size_t) n_samples * batch_size);
+    ggml_backend_tensor_get(audio_tensor, packed.data(), 0, packed.size() * sizeof(float));
+    samples.assign((size_t) batch_size, std::vector<float>((size_t) n_samples));
+    for (int b = 0; b < batch_size; ++b) {
+        std::copy_n(packed.data() + (size_t) b * n_samples, n_samples, samples[(size_t) b].data());
+    }
     const auto t_download = profile_clock::now();
 
     ggml_backend_sched_reset(state.sched);
@@ -96,8 +119,8 @@ bool AudioTokenizerDecoder::decode(const int32_t * codes, int32_t n_frames,
             return std::chrono::duration<double, std::milli>(end - begin).count();
         };
         fprintf(stderr,
-                "[decoder-profile] frames=%d graph=%.3f alloc=%.3f upload=%.3f compute=%.3f download=%.3f reset=%.3f total=%.3f\n",
-                n_frames,
+                "[decoder-profile] frames=%d batch=%d graph=%.3f alloc=%.3f upload=%.3f compute=%.3f download=%.3f reset=%.3f total=%.3f\n",
+                n_frames, batch_size,
                 ms(t_start, t_graph),
                 ms(t_graph, t_alloc),
                 ms(t_alloc, t_upload),
@@ -169,7 +192,8 @@ bool AudioTokenizerDecoder::profile_decode(const int32_t * codes, int32_t n_fram
 
     for (const stage_spec & spec : stages) {
         struct ggml_context * graph_ctx = nullptr;
-        struct ggml_cgraph * gf = decoder_internal::ops::build_graph_impl(*this, n_frames, &graph_ctx, spec.stage);
+        struct ggml_cgraph * gf = decoder_internal::ops::build_graph_impl(
+            *this, n_frames, 1, &graph_ctx, spec.stage);
         if (!gf || !graph_ctx) {
             error_msg = std::string("Failed to build decoder profile graph for ") + spec.name;
             if (graph_ctx) {

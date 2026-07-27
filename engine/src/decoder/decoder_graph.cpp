@@ -5,12 +5,14 @@
 
 namespace qwen3_tts {
 
-struct ggml_cgraph * decoder_internal::ops::build_graph(AudioTokenizerDecoder & self, int32_t n_frames) {
-    return build_graph_impl(self, n_frames, nullptr, profile_stage::none);
+struct ggml_cgraph * decoder_internal::ops::build_graph(AudioTokenizerDecoder & self, int32_t n_frames,
+                                                        int32_t batch_size) {
+    return build_graph_impl(self, n_frames, batch_size, nullptr, profile_stage::none);
 }
 
 struct ggml_cgraph * decoder_internal::ops::build_graph_impl(AudioTokenizerDecoder & self,
                                                              int32_t n_frames,
+                                                             int32_t batch_size,
                                                              struct ggml_context ** graph_ctx_out,
                                                              profile_stage stop_stage) {
     auto & model = self.impl_->model;
@@ -49,7 +51,8 @@ struct ggml_cgraph * decoder_internal::ops::build_graph_impl(AudioTokenizerDecod
 
     struct ggml_tensor * cb_codes_tensors[16];
     for (int cb = 0; cb < 16; ++cb) {
-        cb_codes_tensors[cb] = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, n_frames);
+        cb_codes_tensors[cb] = ggml_new_tensor_1d(
+            ctx0, GGML_TYPE_I32, (int64_t) n_frames * batch_size);
         ggml_set_name(cb_codes_tensors[cb], cb_names[cb]);
         ggml_set_input(cb_codes_tensors[cb]);
     }
@@ -69,7 +72,8 @@ struct ggml_cgraph * decoder_internal::ops::build_graph_impl(AudioTokenizerDecod
         }
     }
 
-    struct ggml_tensor * first_emb_2d = ggml_reshape_2d(ctx0, first_emb, cfg.codebook_dim, n_frames);
+    struct ggml_tensor * first_emb_2d = ggml_reshape_3d(
+        ctx0, first_emb, cfg.codebook_dim, n_frames, batch_size);
     ggml_set_name(first_emb_2d, "first_emb_2d");
 
     struct ggml_tensor * first_proj_weight_2d = ggml_reshape_2d(ctx0, model.vq_first_output_proj,
@@ -82,7 +86,8 @@ struct ggml_cgraph * decoder_internal::ops::build_graph_impl(AudioTokenizerDecod
 
     struct ggml_tensor * rest_proj_2d = nullptr;
     for (int cb = 0; cb < 15; ++cb) {
-        struct ggml_tensor * cb_emb_2d = ggml_reshape_2d(ctx0, rest_emb[cb], cfg.codebook_dim, n_frames);
+        struct ggml_tensor * cb_emb_2d = ggml_reshape_3d(
+            ctx0, rest_emb[cb], cfg.codebook_dim, n_frames, batch_size);
 
         if (cb == 0) {
             ggml_set_name(cb_emb_2d, "rest_cb0_emb_2d");
@@ -101,13 +106,14 @@ struct ggml_cgraph * decoder_internal::ops::build_graph_impl(AudioTokenizerDecod
     struct ggml_tensor * latent_2d = ggml_add(ctx0, first_proj_2d, rest_proj_2d);
     ggml_set_name(latent_2d, "latent_2d");
 
-    struct ggml_tensor * latent_t = ggml_transpose(ctx0, latent_2d);
+    struct ggml_tensor * latent_t = ggml_permute(ctx0, latent_2d, 1, 0, 2, 3);
     ggml_set_name(latent_t, "latent_t");
 
     struct ggml_tensor * latent_cont = ggml_cont(ctx0, latent_t);
     ggml_set_name(latent_cont, "latent_cont");
 
-    struct ggml_tensor * latent = ggml_reshape_3d(ctx0, latent_cont, n_frames, cfg.hidden_dim, 1);
+    struct ggml_tensor * latent = ggml_reshape_3d(
+        ctx0, latent_cont, n_frames, cfg.hidden_dim, batch_size);
     ggml_set_name(latent, "vq_output");
     if (stop_stage == profile_stage::vq_output) {
         return finish_graph_at(latent, "profile_output");
@@ -122,8 +128,7 @@ struct ggml_cgraph * decoder_internal::ops::build_graph_impl(AudioTokenizerDecod
 
     ggml_set_name(cur, "pre_conv_output");
 
-    struct ggml_tensor * cur_2d = ggml_reshape_2d(ctx0, cur, n_frames, cfg.latent_dim);
-    struct ggml_tensor * cur_t = ggml_transpose(ctx0, cur_2d);
+    struct ggml_tensor * cur_t = ggml_permute(ctx0, cur, 1, 0, 2, 3);
     cur = ggml_cont(ctx0, cur_t);
 
     ggml_set_name(cur, "pre_conv_reshaped");
@@ -143,7 +148,8 @@ struct ggml_cgraph * decoder_internal::ops::build_graph_impl(AudioTokenizerDecod
     ggml_set_input(positions);
 
     for (int i = 0; i < cfg.n_pre_tfm_layers; ++i) {
-        cur = apply_pre_tfm_layer(ctx0, self, cur, model.pre_tfm_layers[i], n_frames, positions);
+        cur = apply_pre_tfm_layer(
+            ctx0, self, cur, model.pre_tfm_layers[i], n_frames, batch_size, positions);
     }
 
     if (model.pre_tfm_norm_w) {
@@ -159,7 +165,7 @@ struct ggml_cgraph * decoder_internal::ops::build_graph_impl(AudioTokenizerDecod
 
     cur = ggml_permute(ctx0, cur, 1, 0, 2, 3);
     cur = ggml_cont(ctx0, cur);
-    cur = ggml_reshape_3d(ctx0, cur, n_frames, cfg.latent_dim, 1);
+    cur = ggml_reshape_3d(ctx0, cur, n_frames, cfg.latent_dim, batch_size);
 
     ggml_set_name(cur, "pre_tfm_reshaped");
     if (stop_stage == profile_stage::pre_tfm) {
@@ -213,7 +219,7 @@ struct ggml_cgraph * decoder_internal::ops::build_graph_impl(AudioTokenizerDecod
     ggml_set_name(cur, "dec6_output");
 
     cur = ggml_tanh(ctx0, cur);
-    cur = ggml_reshape_1d(ctx0, cur, cur->ne[0]);
+    cur = ggml_reshape_2d(ctx0, cur, cur->ne[0], batch_size);
 
     ggml_set_name(cur, "audio");
     ggml_set_output(cur);

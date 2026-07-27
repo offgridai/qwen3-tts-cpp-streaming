@@ -11,8 +11,13 @@ add_executable(qwen3_wrapper_model_test
 )
 target_link_libraries(qwen3_wrapper_model_test PRIVATE qwen3_tts_streaming)
 
+add_executable(qwen3_decoder_batch_test
+    decoder_batch_test.cpp
+)
+target_link_libraries(qwen3_decoder_batch_test PRIVATE audio_tokenizer_decoder)
+
 if(WIN32)
-    foreach(test_target qwen3_wrapper_contract_test qwen3_wrapper_model_test)
+    foreach(test_target qwen3_wrapper_contract_test qwen3_wrapper_model_test qwen3_decoder_batch_test)
         add_custom_command(TARGET ${test_target} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_directory
                 ${CMAKE_BINARY_DIR}/bin
@@ -33,6 +38,16 @@ if(QWEN3_TTS_ENABLE_MODEL_TESTS)
     )
     set_tests_properties(wrapper_model_contract PROPERTIES
         LABELS "model;gpu;contract"
+        TIMEOUT 120
+    )
+    add_test(
+        NAME decoder_physical_batch
+        COMMAND qwen3_decoder_batch_test
+            ${CMAKE_SOURCE_DIR}/models/qwen3-tts-tokenizer-f16.gguf
+            45
+    )
+    set_tests_properties(decoder_physical_batch PROPERTIES
+        LABELS "model;gpu;batch"
         TIMEOUT 120
     )
 endif()

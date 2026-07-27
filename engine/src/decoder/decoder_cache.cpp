@@ -11,6 +11,7 @@ void decoder_internal::ops::release_cached_decode_graph(AudioTokenizerDecoder & 
     state.decode_positions_tensor = nullptr;
     state.decode_audio_tensor = nullptr;
     state.decode_graph_n_frames = 0;
+    state.decode_graph_batch_size = 0;
     for (int i = 0; i < 16; ++i) {
         state.decode_code_tensors[i] = nullptr;
     }
@@ -20,7 +21,8 @@ void decoder_internal::ops::release_cached_decode_graph(AudioTokenizerDecoder & 
     }
 }
 
-bool decoder_internal::ops::ensure_cached_decode_graph(AudioTokenizerDecoder & self, int32_t n_frames) {
+bool decoder_internal::ops::ensure_cached_decode_graph(AudioTokenizerDecoder & self, int32_t n_frames,
+                                                       int32_t batch_size) {
     auto & state = self.impl_->state;
     auto & error_msg = self.impl_->error_msg;
 
@@ -29,7 +31,8 @@ bool decoder_internal::ops::ensure_cached_decode_graph(AudioTokenizerDecoder & s
     // so a repeated window cannot reuse stale CUDA addresses.
     release_cached_decode_graph(self);
 
-    state.decode_graph = build_graph_impl(self, n_frames, &state.decode_graph_ctx, profile_stage::none);
+    state.decode_graph = build_graph_impl(
+        self, n_frames, batch_size, &state.decode_graph_ctx, profile_stage::none);
     if (!state.decode_graph || !state.decode_graph_ctx) {
         error_msg = "Failed to build cached decoder graph";
         release_cached_decode_graph(self);
@@ -56,6 +59,7 @@ bool decoder_internal::ops::ensure_cached_decode_graph(AudioTokenizerDecoder & s
     }
 
     state.decode_graph_n_frames = n_frames;
+    state.decode_graph_batch_size = batch_size;
     return true;
 }
 

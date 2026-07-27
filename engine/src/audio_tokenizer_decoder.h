@@ -62,6 +62,11 @@ public:
     bool decode(const int32_t * codes, int32_t n_frames,
                 std::vector<float> & samples);
 
+    // Decode an equal-length physical batch. Codes are laid out as
+    // [batch_size, n_frames, n_codebooks]; each output row is independent.
+    bool decode_batch(const int32_t * codes, int32_t n_frames, int32_t batch_size,
+                      std::vector<std::vector<float>> & samples);
+
     // Profile cumulative decoder graph prefixes for the given codes.
     // Diagnostic-only; normal decode behavior is unchanged.
     bool profile_decode(const int32_t * codes, int32_t n_frames,
