@@ -24,10 +24,9 @@ bool decoder_internal::ops::ensure_cached_decode_graph(AudioTokenizerDecoder & s
     auto & state = self.impl_->state;
     auto & error_msg = self.impl_->error_msg;
 
-    if (state.decode_graph && state.decode_graph_n_frames == n_frames) {
-        return true;
-    }
-
+    // sched_reset releases graph scratch storage but does not clear every data
+    // pointer embedded in the graph tensors. Rebuild the cheap metadata graph
+    // so a repeated window cannot reuse stale CUDA addresses.
     release_cached_decode_graph(self);
 
     state.decode_graph = build_graph_impl(self, n_frames, &state.decode_graph_ctx, profile_stage::none);

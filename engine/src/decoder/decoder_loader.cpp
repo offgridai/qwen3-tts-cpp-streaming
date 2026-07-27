@@ -6,6 +6,9 @@
 #include <cstdio>
 #include <cstring>
 
+extern "C" void ggml_backend_cuda_disable_graphs(ggml_backend_t backend);
+extern "C" void ggml_backend_cuda_disable_vmm(ggml_backend_t backend);
+
 namespace qwen3_tts {
 
 AudioTokenizerDecoder::AudioTokenizerDecoder()
@@ -58,18 +61,20 @@ void decoder_internal::ops::normalize_codebooks(AudioTokenizerDecoder & self) {
     const float epsilon = 1e-5f;
 
     auto normalize_codebook = [epsilon](struct ggml_tensor * codebook, struct ggml_tensor * usage, const char *) {
-        if (!codebook || !usage || !codebook->data || !usage->data) {
+        if (!codebook || !usage || !codebook->data || !usage->data ||
+            codebook->type != GGML_TYPE_F16 || usage->type != GGML_TYPE_F32) {
             return;
         }
 
         const int64_t codebook_dim = codebook->ne[0];
         const int64_t codebook_size = codebook->ne[1];
-
-        ggml_fp16_t * cb_data = (ggml_fp16_t *) codebook->data;
-        float * usage_data = (float *) usage->data;
+        std::vector<ggml_fp16_t> cb_data((size_t) ggml_nelements(codebook));
+        std::vector<float> usage_data((size_t) ggml_nelements(usage));
+        ggml_backend_tensor_get(codebook, cb_data.data(), 0, ggml_nbytes(codebook));
+        ggml_backend_tensor_get(usage, usage_data.data(), 0, ggml_nbytes(usage));
 
         for (int64_t emb_idx = 0; emb_idx < codebook_size; ++emb_idx) {
-            float u = usage_data[emb_idx];
+            float u = usage_data[(size_t) emb_idx];
             if (u < epsilon) {
                 u = epsilon;
             }
@@ -77,10 +82,12 @@ void decoder_internal::ops::normalize_codebooks(AudioTokenizerDecoder & self) {
 
             for (int64_t dim_idx = 0; dim_idx < codebook_dim; ++dim_idx) {
                 const int64_t mem_idx = dim_idx + emb_idx * codebook_dim;
-                const float val = ggml_fp16_to_fp32(cb_data[mem_idx]);
-                cb_data[mem_idx] = ggml_fp32_to_fp16(val * inv_u);
+                const float val = ggml_fp16_to_fp32(cb_data[(size_t) mem_idx]);
+                cb_data[(size_t) mem_idx] = ggml_fp32_to_fp16(val * inv_u);
             }
         }
+
+        ggml_backend_tensor_set(codebook, cb_data.data(), 0, ggml_nbytes(codebook));
     };
 
     normalize_codebook(model.vq_first_codebook, model.vq_first_usage, "first");
@@ -305,9 +312,19 @@ bool AudioTokenizerDecoder::load_model(const std::string & model_path) {
         }
     }
 
+    state.backend = init_preferred_backend("AudioTokenizerDecoder", &error_msg);
+    if (!state.backend) {
+        return false;
+    }
+    ggml_backend_dev_t device = ggml_backend_get_device(state.backend);
+    if (device && ggml_backend_dev_type(device) == GGML_BACKEND_DEVICE_TYPE_GPU) {
+        ggml_backend_cuda_disable_graphs(state.backend);
+        ggml_backend_cuda_disable_vmm(state.backend);
+    }
+
     if (!load_tensor_data_from_file(model_path, gguf_ctx, model.ctx,
                                     model.tensors, model.buffer, error_msg,
-                                    GGML_BACKEND_DEVICE_TYPE_IGPU)) {
+                                    state.backend)) {
         return false;
     }
 
@@ -318,22 +335,6 @@ bool AudioTokenizerDecoder::load_model(const std::string & model_path) {
     }
 
     decoder_internal::ops::normalize_codebooks(*this);
-    auto upload_if_present = [](struct ggml_tensor * t) {
-        if (t && t->data) {
-            ggml_backend_tensor_set(t, t->data, 0, ggml_nbytes(t));
-        }
-    };
-    upload_if_present(model.vq_first_codebook);
-    for (int i = 0; i < 15; ++i) {
-        upload_if_present(model.vq_rest_codebook[i]);
-    }
-
-    state.backend = init_preferred_backend("AudioTokenizerDecoder", &error_msg);
-    if (!state.backend) {
-        return false;
-    }
-
-    ggml_backend_dev_t device = ggml_backend_get_device(state.backend);
     const char * device_name = device ? ggml_backend_dev_name(device) : "Unknown";
     fprintf(stderr, "  AudioTokenizerDecoder backend: %s\n", device_name);
 
@@ -350,7 +351,7 @@ bool AudioTokenizerDecoder::load_model(const std::string & model_path) {
     if (state.backend_cpu) {
         backends.push_back(state.backend_cpu);
     }
-    state.sched = ggml_backend_sched_new(backends.data(), nullptr, (int) backends.size(), QWEN3_TTS_DEC_MAX_NODES, false, true);
+    state.sched = ggml_backend_sched_new(backends.data(), nullptr, (int) backends.size(), QWEN3_TTS_DEC_MAX_NODES, false, false);
     if (!state.sched) {
         error_msg = "Failed to create backend scheduler";
         return false;

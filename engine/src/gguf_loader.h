@@ -73,6 +73,18 @@ bool load_tensor_data_from_file(
     enum ggml_backend_dev_type preferred_backend_type = GGML_BACKEND_DEVICE_TYPE_CPU
 );
 
+// Allocate and load tensors on an already-owned backend. The caller must keep
+// the backend alive until the returned buffer is freed.
+bool load_tensor_data_from_file(
+    const std::string & path,
+    struct gguf_context * ctx,
+    struct ggml_context * model_ctx,
+    const std::map<std::string, struct ggml_tensor *> & tensors,
+    ggml_backend_buffer_t & buffer,
+    std::string & error_msg,
+    ggml_backend_t backend
+);
+
 // Helper to initialize backend with GPU preference and CPU fallback
 ggml_backend_t init_preferred_backend(const char * component_name, std::string * error_msg);
 void release_preferred_backend(ggml_backend_t backend);

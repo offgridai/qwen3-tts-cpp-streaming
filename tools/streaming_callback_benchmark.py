@@ -78,6 +78,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--adaptive-high-ms", type=int, default=520)
     parser.add_argument("--context-frames", type=int, help="Override steady decoder left context.")
     parser.add_argument("--first-window-frames", type=int, help="Override the first decoder window size.")
+    parser.add_argument("--steady-window-frames", type=int, help="Override the steady decoder window size.")
     parser.add_argument("--early-context-frames", type=int, help="Override left context for the early decoder windows.")
     parser.add_argument("--ramp-window-frames", type=int, help="Override the post-start ramp window size.")
     parser.add_argument("--ramp-window-count", type=int, help="Override the number of ramp windows.")
@@ -208,6 +209,8 @@ def main() -> int:
         cmd.extend(["--context-frames", str(args.context_frames)])
     if args.first_window_frames is not None:
         cmd.extend(["--first-tail-window-frames", str(args.first_window_frames)])
+    if args.steady_window_frames is not None:
+        cmd.extend(["--steady-tail-window-frames", str(args.steady_window_frames)])
     if args.early_context_frames is not None:
         cmd.extend(["--early-context-frames", str(args.early_context_frames)])
     if args.ramp_window_frames is not None:

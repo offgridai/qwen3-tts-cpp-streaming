@@ -88,6 +88,16 @@ Outputs are named `<transcript-id>__<voice-id>__seed_<seed>.wav`. A
 `batch_results.tsv` index is written alongside them. The model remains loaded
 for the entire batch, while each voice embedding is loaded once per voice.
 
+For exact per-utterance assignments, use `--batch-job-list <tsv>` instead of
+the three Cartesian inputs. Each non-comment row has five tab-separated fields:
+
+```text
+job-id  transcript-path  voice-id  voice-json-path  seed
+```
+
+Paths may be relative to the job-list file. Each job produces `<job-id>.wav`;
+ordering jobs by voice avoids reloading the same speaker embedding.
+
 ## Build options and outputs
 
 `QWEN3_TTS_BUILD_STREAMING_WRAPPER=OFF` omits the integration library and its CLI. `QWEN3_TTS_BUILD_STREAMING_CLI=OFF` builds the library without the harness.
@@ -258,6 +268,7 @@ Run `py -3 tools\acceptance.py --full` for the six-case, six-seed reliability co
 - `QWEN3_TTS_LOW_MEM=1`: lazily load and unload large components.
 - `QWEN3_TTS_PRIME_RUNTIME=full`: prime the steady vocoder shape; `0` disables priming.
 - `QWEN3_TTS_GGML_DEBUG=1`: enable GGML debug logging.
+- `GGML_CUDA_GRAPH_STATS=1`: print opt-in CUDA graph capture and replay counters when each CUDA backend is released.
 - `QWEN3_TTS_USE_COREML=1`: enable CoreML prediction on supported macOS builds.
 - `QWEN3_TTS_PROFILE_DECODER=1`: print detailed vocoder profiling.
 - `QWEN3_TTS_DEBUG_DUMP_DIR=<path>`: write transformer parity traces.
@@ -278,6 +289,7 @@ Further reading:
 - [Architecture](docs/architecture.md)
 - [Current 0.6B baseline](docs/performance-baseline-0.6b-current.md)
 - [Optimization results](docs/optimization-results-0.6b.md)
+- [CUDA graph and GPU-resident vocoder evaluation](docs/cuda-graph-evaluation.md)
 - [Historical baseline](docs/performance-baseline-0.6b.md)
 
 Use each CLI's `--help` output as the authoritative option reference.
