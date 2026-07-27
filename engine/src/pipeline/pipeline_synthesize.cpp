@@ -811,7 +811,9 @@ tts_result pipeline_internal::ops::synthesize_internal(Qwen3TTS & self,
         const int32_t first_window = clamp_positive(params.first_tail_window_frames, 3);
         const int32_t ramp_window = clamp_positive(params.ramp_tail_window_frames, 6);
         const int32_t ramp_window_count = std::max<int32_t>(0, params.ramp_tail_window_count);
-        const int32_t steady_window = clamp_positive(params.steady_tail_window_frames, 8);
+        const int32_t steady_window = params.steady_tail_window_frames > 0
+            ? params.steady_tail_window_frames
+            : (self.transformer_.get_config().hidden_size >= 2048 ? 12 : 7);
         const int32_t context_frames = std::max<int32_t>(0, params.context_frames);
         const int32_t early_context_frames = std::max<int32_t>(0, params.early_context_frames);
         const int32_t early_context_window_count = std::max<int32_t>(0, params.early_context_window_count);

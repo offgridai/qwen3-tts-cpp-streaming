@@ -531,7 +531,7 @@ struct ggml_cuda_pool_vmm : public ggml_cuda_pool {
 std::unique_ptr<ggml_cuda_pool> ggml_backend_cuda_context::new_pool_for_device(int                  device,
                                                                                [[maybe_unused]] int stream_no) {
 #if defined(GGML_USE_VMM)
-    if (ggml_cuda_info().devices[device].vmm) {
+    if (ggml_cuda_info().devices[device].vmm && !vmm_disabled) {
         return std::unique_ptr<ggml_cuda_pool>(new ggml_cuda_pool_vmm(device));
     }
 #endif // defined(GGML_USE_VMM)
@@ -545,9 +545,78 @@ static std::mutex ggml_cuda_lock;
 static std::condition_variable ggml_cuda_lock_cv;
 static std::atomic<int> ggml_cuda_lock_counter;
 
+static std::mutex ggml_cuda_graph_disable_lock;
+static std::unordered_set<const void *> ggml_cuda_graph_disabled_contexts;
+
+extern "C" GGML_BACKEND_API void ggml_backend_cuda_disable_graphs(ggml_backend_t backend) {
+    if (!backend || !ggml_backend_is_cuda(backend)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(ggml_cuda_graph_disable_lock);
+    ggml_cuda_graph_disabled_contexts.insert(backend->context);
+}
+
+extern "C" GGML_BACKEND_API void ggml_backend_cuda_disable_vmm(ggml_backend_t backend) {
+    if (!backend || !ggml_backend_is_cuda(backend)) {
+        return;
+    }
+    auto * cuda_ctx = static_cast<ggml_backend_cuda_context *>(backend->context);
+    cuda_ctx->vmm_disabled = true;
+}
+
+static bool ggml_cuda_graphs_disabled_for_context(const ggml_backend_cuda_context * cuda_ctx) {
+    std::lock_guard<std::mutex> lock(ggml_cuda_graph_disable_lock);
+    return ggml_cuda_graph_disabled_contexts.count(cuda_ctx) != 0;
+}
+
+#ifdef USE_CUDA_GRAPH
+static bool ggml_cuda_graph_stats_enabled() {
+    static const bool enabled = getenv("GGML_CUDA_GRAPH_STATS") != nullptr;
+    return enabled;
+}
+#endif
+
 ggml_backend_cuda_context::~ggml_backend_cuda_context() {
     std::unique_lock<std::mutex> lock(ggml_cuda_lock);
     ggml_cuda_lock_cv.wait(lock, []{ return ggml_cuda_lock_counter.load(std::memory_order_relaxed) == 0; });
+
+#ifdef USE_CUDA_GRAPH
+    if (ggml_cuda_graph_stats_enabled()) {
+        uint64_t compute_calls = 0;
+        uint64_t compatible_calls = 0;
+        uint64_t property_changes = 0;
+        uint64_t warmup_completions = 0;
+        uint64_t warmup_resets = 0;
+        uint64_t captures = 0;
+        uint64_t launches = 0;
+        uint64_t replays = 0;
+        size_t active_graphs = 0;
+
+        for (const auto & [key, graph] : cuda_graphs) {
+            GGML_UNUSED(key);
+            if (!graph) {
+                continue;
+            }
+            compute_calls += graph->compute_calls;
+            compatible_calls += graph->compatible_calls;
+            property_changes += graph->property_changes;
+            warmup_completions += graph->warmup_completions;
+            warmup_resets += graph->warmup_resets;
+            captures += graph->captures;
+            launches += graph->launches;
+            replays += graph->replays;
+            active_graphs += graph->instance != nullptr;
+        }
+
+        GGML_LOG_INFO(
+            "CUDA graph stats: keys=%zu active=%zu compute=%" PRIu64
+            " compatible=%" PRIu64 " changes=%" PRIu64
+            " warmups=%" PRIu64 " resets=%" PRIu64
+            " captures=%" PRIu64 " launches=%" PRIu64 " replays=%" PRIu64 "\n",
+            cuda_graphs.size(), active_graphs, compute_calls, compatible_calls,
+            property_changes, warmup_completions, warmup_resets, captures, launches, replays);
+    }
+#endif
 
     if (copy_event != nullptr) {
         CUDA_CHECK(cudaEventDestroy(copy_event));
@@ -2781,6 +2850,11 @@ static const char * ggml_backend_cuda_get_name(ggml_backend_t backend) {
 static void ggml_backend_cuda_free(ggml_backend_t backend) {
     ggml_backend_cuda_context * cuda_ctx = (ggml_backend_cuda_context *)backend->context;
 
+    {
+        std::lock_guard<std::mutex> lock(ggml_cuda_graph_disable_lock);
+        ggml_cuda_graph_disabled_contexts.erase(cuda_ctx);
+    }
+
     delete cuda_ctx;
     delete backend;
 }
@@ -3906,6 +3980,11 @@ static void ggml_cuda_graph_evaluate_and_capture(ggml_backend_cuda_context * cud
 static bool ggml_cuda_graph_set_enabled(ggml_backend_cuda_context * cuda_ctx, const void * graph_key) {
     ggml_cuda_graph * graph = cuda_ctx->cuda_graph(graph_key);
 
+    if (ggml_cuda_graphs_disabled_for_context(cuda_ctx)) {
+        graph->disable_due_to_gpu_arch = true;
+        return false;
+    }
+
     if (graph->graph == nullptr) {
         if (ggml_cuda_info().devices[cuda_ctx->device].cc < GGML_CUDA_CC_AMPERE) {
             if (!graph->disable_due_to_gpu_arch) {
@@ -3934,15 +4013,28 @@ static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t backend, 
     ggml_cuda_graph_set_enabled(cuda_ctx, graph_key);
 
     ggml_cuda_graph * graph = cuda_ctx->cuda_graph(graph_key);
+    const bool collect_stats = ggml_cuda_graph_stats_enabled();
+    if (collect_stats) {
+        graph->compute_calls++;
+    }
     if (graph->is_enabled()) {
         const bool graph_compatible = ggml_cuda_graph_check_compability(cgraph);
         if (graph_compatible) {
+            if (collect_stats) {
+                graph->compatible_calls++;
+            }
             const bool properties_changed = ggml_cuda_graph_update_required(cuda_ctx, cgraph);
+            if (collect_stats && properties_changed) {
+                graph->property_changes++;
+            }
 
             if (!graph->warmup_complete) {
                 // Warmup: need at least 2 calls with no property change on the 2nd call
                 if (!properties_changed) {
                     graph->warmup_complete = true;
+                    if (collect_stats) {
+                        graph->warmup_completions++;
+                    }
                     GGML_LOG_DEBUG("%s: CUDA graph warmup complete\n", __func__);
                     use_cuda_graph = true;
                     cuda_graph_update_required = true;
@@ -3953,6 +4045,9 @@ static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t backend, 
                 if (properties_changed) {
                     // Properties changed - reset warmup, execute directly until stable again
                     graph->warmup_complete = false;
+                    if (collect_stats) {
+                        graph->warmup_resets++;
+                    }
                     GGML_LOG_DEBUG("%s: CUDA graph warmup reset\n", __func__);
                 } else {
                     use_cuda_graph = true;
@@ -3964,6 +4059,11 @@ static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t backend, 
 #endif // USE_CUDA_GRAPH
 
     if (use_cuda_graph && cuda_graph_update_required) {
+#ifdef USE_CUDA_GRAPH
+        if (collect_stats) {
+            graph->captures++;
+        }
+#endif
         // Start CUDA graph capture
         {
             std::lock_guard<std::mutex> lock(ggml_cuda_lock);
@@ -3974,6 +4074,15 @@ static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t backend, 
     }
 
     ggml_cuda_graph_evaluate_and_capture(cuda_ctx, cgraph, use_cuda_graph, cuda_graph_update_required, graph_key);
+
+#ifdef USE_CUDA_GRAPH
+    if (use_cuda_graph) {
+        if (collect_stats) {
+            graph->launches++;
+            graph->replays += !cuda_graph_update_required;
+        }
+    }
+#endif
 
     return GGML_STATUS_SUCCESS;
 }

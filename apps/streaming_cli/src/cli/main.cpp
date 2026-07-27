@@ -227,12 +227,12 @@ bool ApplyProfile(const std::string& profile, TtsStreamOptions& options) {
         options.first_tail_window_frames = 5;
         options.ramp_tail_window_frames = 5;
         options.ramp_tail_window_count = 2;
-        options.steady_tail_window_frames = 8;
+        options.steady_tail_window_frames = 0;
         options.context_frames = 2;
         options.early_context_frames = 1;
         options.early_context_window_count = 2;
         options.final_context_frames = 3;
-        options.adaptive_steady_windows = true;
+        options.adaptive_steady_windows = false;
         options.adaptive_min_tail_window_frames = 7;
         options.adaptive_low_watermark_ms = 220;
         options.adaptive_high_watermark_ms = 520;

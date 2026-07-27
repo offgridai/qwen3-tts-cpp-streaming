@@ -74,7 +74,8 @@ struct tts_params {
     // preserving the larger hot-path decode shape for throughput.
     int32_t ramp_tail_window_frames = 6;
     int32_t ramp_tail_window_count = 0;
-    int32_t steady_tail_window_frames = 8;
+    // 0 selects a model-tuned default in the streaming pipeline.
+    int32_t steady_tail_window_frames = 0;
     int32_t context_frames = 2;
     // Optional reduced left-context for early non-final windows. <=0 means
     // use context_frames for every non-final window.

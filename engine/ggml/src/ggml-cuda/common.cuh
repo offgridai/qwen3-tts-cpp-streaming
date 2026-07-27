@@ -1150,6 +1150,14 @@ struct ggml_cuda_graph {
     std::vector<cudaGraphNode_t> nodes;
     bool disable_due_to_gpu_arch = false;
     bool warmup_complete = false;
+    uint64_t compute_calls = 0;
+    uint64_t compatible_calls = 0;
+    uint64_t property_changes = 0;
+    uint64_t warmup_completions = 0;
+    uint64_t warmup_resets = 0;
+    uint64_t captures = 0;
+    uint64_t launches = 0;
+    uint64_t replays = 0;
     std::vector<ggml_cuda_graph_node_properties> props;
 
     // these are extra tensors (inputs) that participate in the ggml graph but are not nodes
@@ -1320,6 +1328,7 @@ struct ggml_backend_cuda_context {
     int device;
     std::string name;
     cudaEvent_t copy_event = nullptr;
+    bool vmm_disabled = false;
 
     cudaStream_t streams[GGML_CUDA_MAX_DEVICES][GGML_CUDA_MAX_STREAMS] = { { nullptr } };
     cublasHandle_t cublas_handles[GGML_CUDA_MAX_DEVICES] = {nullptr};
@@ -1399,7 +1408,7 @@ struct ggml_backend_cuda_context {
     // pool
     std::unique_ptr<ggml_cuda_pool> pools[GGML_CUDA_MAX_DEVICES][GGML_CUDA_MAX_STREAMS];
 
-    static std::unique_ptr<ggml_cuda_pool> new_pool_for_device(int device, int stream_no);
+    std::unique_ptr<ggml_cuda_pool> new_pool_for_device(int device, int stream_no);
 
     ggml_cuda_pool & pool(int device) {
         if (pools[device][curr_stream_no] == nullptr) {

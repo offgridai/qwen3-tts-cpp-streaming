@@ -9,29 +9,12 @@ struct ggml_tensor * decoder_internal::ops::apply_snake(struct ggml_context * ct
                                                         struct ggml_tensor * x,
                                                         struct ggml_tensor * alpha,
                                                         struct ggml_tensor * beta) {
-    int64_t seq_len = x->ne[0];
-    int64_t channels = x->ne[1];
-    int64_t batch = x->ne[2];
-
-    struct ggml_tensor * alpha_exp = ggml_exp(ctx, alpha);
-
-    struct ggml_tensor * alpha_3d = ggml_reshape_3d(ctx, alpha_exp, 1, channels, 1);
-    struct ggml_tensor * alpha_broad = ggml_repeat(ctx, alpha_3d,
-                                                    ggml_new_tensor_3d(ctx, GGML_TYPE_F32, seq_len, channels, batch));
-
-    struct ggml_tensor * ax = ggml_mul(ctx, x, alpha_broad);
-    struct ggml_tensor * sin_ax = ggml_sin(ctx, ax);
-    struct ggml_tensor * sin_sq = ggml_sqr(ctx, sin_ax);
-
-    struct ggml_tensor * neg_beta = ggml_scale(ctx, beta, -1.0f);
-    struct ggml_tensor * inv_beta_exp = ggml_exp(ctx, neg_beta);
-    struct ggml_tensor * inv_beta_3d = ggml_reshape_3d(ctx, inv_beta_exp, 1, channels, 1);
-    struct ggml_tensor * inv_beta = ggml_repeat(ctx, inv_beta_3d,
-                                                 ggml_new_tensor_3d(ctx, GGML_TYPE_F32, seq_len, channels, batch));
-
-    struct ggml_tensor * scaled_sin = ggml_mul(ctx, sin_sq, inv_beta);
-
-    return ggml_add(ctx, x, scaled_sin);
+    const int64_t channels = x->ne[1];
+    struct ggml_tensor * alpha_3d = ggml_reshape_3d(ctx, ggml_exp(ctx, alpha), 1, channels, 1);
+    struct ggml_tensor * sin_ax = ggml_sin(ctx, ggml_mul(ctx, x, alpha_3d));
+    struct ggml_tensor * inv_beta_3d = ggml_reshape_3d(
+        ctx, ggml_exp(ctx, ggml_scale(ctx, beta, -1.0f)), 1, channels, 1);
+    return ggml_add(ctx, x, ggml_mul(ctx, ggml_sqr(ctx, sin_ax), inv_beta_3d));
 }
 
 struct ggml_tensor * decoder_internal::ops::apply_rms_norm(struct ggml_context * ctx,
@@ -174,8 +157,7 @@ struct ggml_tensor * decoder_internal::ops::apply_upsample_block(struct ggml_con
 
     if (block.gamma) {
         struct ggml_tensor * gamma_3d = ggml_reshape_3d(ctx, block.gamma, 1, channels, 1);
-        x = ggml_mul(ctx, x, ggml_repeat(ctx, gamma_3d,
-                                          ggml_new_tensor_3d(ctx, GGML_TYPE_F32, new_seq_len, channels, 1)));
+        x = ggml_mul(ctx, x, gamma_3d);
     }
 
     return ggml_add(ctx, residual, x);
