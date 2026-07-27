@@ -72,23 +72,22 @@ struct tts_params {
     // Offline batching hook: generate codec frames but leave vocoder decode to
     // decode_audio_codes_batch(). Ignored when streaming_generate is true.
     bool defer_audio_decode = false;
-    int32_t first_tail_window_frames = 3;
+    int32_t first_tail_window_frames = 6;
     // After the first window, optionally use a few smaller ramp windows before
     // settling into the steady-state size. This reduces early burstiness while
     // preserving the larger hot-path decode shape for throughput.
     int32_t ramp_tail_window_frames = 6;
-    int32_t ramp_tail_window_count = 0;
-    // 0 selects a model-tuned default in the streaming pipeline.
-    int32_t steady_tail_window_frames = 0;
-    int32_t context_frames = 2;
+    int32_t ramp_tail_window_count = 2;
+    int32_t steady_tail_window_frames = 10;
+    int32_t context_frames = 4;
     // Optional reduced left-context for early non-final windows. <=0 means
     // use context_frames for every non-final window.
-    int32_t early_context_frames = 1;
+    int32_t early_context_frames = 2;
     int32_t early_context_window_count = 2;
     // Optional larger context for the final streaming window. A short steady-state
     // context is good for latency, but the last acoustic tail can need more left
     // context to avoid sounding clipped/truncated. <=0 means use context_frames.
-    int32_t final_context_frames = 3;
+    int32_t final_context_frames = 8;
 
     // Queue vocoder work to a background worker so autoregressive generation can
     // continue while prior windows decode.

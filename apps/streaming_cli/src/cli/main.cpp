@@ -226,14 +226,14 @@ bool ApplyProfile(const std::string& profile, TtsStreamOptions& options) {
     }
     if (profile == "offgrid-callback") {
         options.live_preroll_ms = 150;
-        options.first_tail_window_frames = 5;
-        options.ramp_tail_window_frames = 5;
+        options.first_tail_window_frames = 6;
+        options.ramp_tail_window_frames = 6;
         options.ramp_tail_window_count = 2;
-        options.steady_tail_window_frames = 0;
-        options.context_frames = 2;
-        options.early_context_frames = 1;
+        options.steady_tail_window_frames = 10;
+        options.context_frames = 4;
+        options.early_context_frames = 2;
         options.early_context_window_count = 2;
-        options.final_context_frames = 3;
+        options.final_context_frames = 8;
         options.adaptive_steady_windows = false;
         options.adaptive_min_tail_window_frames = 7;
         options.adaptive_low_watermark_ms = 220;

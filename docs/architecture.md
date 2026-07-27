@@ -56,19 +56,29 @@ The first decode is queued when the first-window frame count is available. Later
 
 With asynchronous decode enabled, one worker processes vocoder jobs while generation continues producing codes. The final job uses the configured final context and marks the final PCM callback.
 
+CUDA vocoder weights are uploaded once and retained in the decoder's live GPU
+backend. Decode graphs therefore upload only request-specific codec IDs and
+download PCM instead of recopying model tensors for every streaming window.
+The vocoder uses eager CUDA execution with the legacy scratch allocator because
+its dynamic graphs are not capture-safe; transformer CUDA graphs and VMM remain
+enabled. This reduced measured 1.7B streaming RTF from 0.794 to 0.360 on the
+long RTX 5090 evaluation passage.
+
 Offline physical batching is a separate, opt-in path. Requests generate codec
 frames sequentially, then equal-frame-count sequences are packed into one
 decoder graph with a real batch dimension. This batches the pre-transformer,
 upsampling, convolution, and Code2Wav work without duplicating model instances.
 It does not batch the autoregressive talker, so it improves aggregate offline
 throughput rather than time to first audio. Batch size one remains the default.
+The CLI exposes either Cartesian transcript/voice/seed lists or an explicit job
+TSV, plus `--vocoder-batch-size` for the maximum physical decoder group.
 
 Default engine and wrapper values:
 
 ```text
-first/ramp/steady windows: 3 / 6 / 8 frames
-ramp count:                0
-context/early/final:       2 / 1 / 3 frames
+first/ramp/steady windows: 6 / 6 / 10 frames
+ramp count:                2
+context/early/final:       4 / 2 / 8 frames
 early-context windows:     2
 async decode:              on
 adaptive windows:          off
@@ -77,7 +87,11 @@ delivery chunk/start:      40 / 40 ms
 delivery target lead:      300 ms
 ```
 
-`offgrid-callback` uses a 5-frame first window, two 5-frame ramp windows, 2-frame left context, adaptive 7-8-frame steady windows, 240 ms callback chunks, and a 520 ms target lead.
+The raw engine and wrapper quality defaults use 6-frame first and ramp windows,
+two ramp windows, fixed 10-frame steady windows, 4-frame left context, 2-frame
+early context, and 8-frame final context. `offgrid-callback` adds 240 ms paced
+callback chunks and a 520 ms target lead. Larger fixed windows reduce join
+frequency; additional context improves continuity at each join.
 
 ## Delivery and playback
 

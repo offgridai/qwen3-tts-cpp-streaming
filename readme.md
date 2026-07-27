@@ -66,6 +66,23 @@ build-ninja-cuda\apps\streaming_cli\qwen3_streaming_cli.exe `
 
 Use `--no-play-streaming --simulate-stream-callback` for a silent callback-path run. On Windows, streaming CLI diagnostics go to stdout, so `2>&1` is unnecessary when piping to `Tee-Object`.
 
+## Current RTX 5090 performance
+
+These are local F16 measurements from 2026-07-27 with a stored Priestley clone,
+seed 42, the `offgrid-callback` profile, and a simulated 350 ms playback buffer.
+They are workload-specific rather than hardware-portable claims.
+
+| Model | Cold model start | Resident first 350 ms | Streaming speed | Maximum production gap |
+|---|---:|---:|---:|---:|
+| 0.6B Base | 1.30-1.33 s | 283-302 ms | 2.61-2.72x realtime (RTF 0.368-0.383) | 239-262 ms |
+| 1.7B Base | 1.93-1.98 s | 319-342 ms | 2.48-2.53x realtime (RTF 0.395-0.404) | 251-295 ms |
+
+The current 28.8 s Priestley reference takes 348-355 ms to encode with the
+already-loaded 1.7B model, making cold clone readiness about 2.28-2.33 s. A
+longer 1.7B evaluation produced 2.78x realtime (RTF 0.360), showing the expected
+amortization of startup work. Neither streaming case produced a simulated
+playback underrun. See the linked performance records for exact methodology.
+
 ### Persistent batch synthesis
 
 The streaming CLI can load the model once and synthesize the Cartesian product
@@ -121,6 +138,11 @@ job-id  transcript-path  voice-id  voice-json-path  seed
 
 Paths may be relative to the job-list file. Each job produces `<job-id>.wav`;
 ordering jobs by voice avoids reloading the same speaker embedding.
+
+Batch controls are mutually exclusive: use either the three Cartesian list
+options or `--batch-job-list`. `--vocoder-batch-size` affects only offline batch
+jobs, requires equal codec-frame counts within a physical group, and does not
+improve streaming time to first audio.
 
 ## Build options and outputs
 
@@ -242,7 +264,13 @@ The wrapper:
 | `realtime` | 0.6B F16 | 3-frame first window; raw decode callbacks |
 | `memory-saver` | 0.6B Q5_K | Lower-memory quantized model |
 | `ultra-low` | 0.6B Q4_K | Smallest supported quantized model |
-| `offgrid-callback` | Caller-selected | 5-frame first window, two 5-frame ramps, adaptive 7-8-frame steady windows, 240 ms callback chunks, 520 ms target lead |
+| `offgrid-callback` | Caller-selected | 6-frame first window, two 6-frame ramps, fixed 10-frame steady windows, 4-frame context, 240 ms callback chunks, 520 ms target lead |
+
+The quality-oriented default spends some of the resident vocoder's performance
+headroom on larger, less frequent decode windows and twice the previous left
+context. Five 1.7B tuning seeds reached the first 350 ms in 309-318 ms with no
+simulated underruns. This is intended to reduce audible joins and synthetic
+window-to-window variation; listening remains the decisive quality test.
 
 The engine owns optional Windows `waveOut` playback. Applications consuming PCM callbacks should implement their own device integration and buffering policy.
 
@@ -288,7 +316,7 @@ build-ninja-cuda\apps\streaming_cli\qwen3_streaming_cli.exe `
 
 ## Sampling and reliability
 
-Listening-selected defaults are temperature 0.75, top-k 16, residual top-p 0.9, repetition penalty 1.02, and semantic CB0 top-p 1.0. A text-relative safety ceiling prevents runaway generation when EOS is not sampled. Use `--seed` for deterministic output.
+Listening-selected defaults are temperature 0.75, top-k 16, residual top-p 0.9, repetition penalty 1.02, and semantic CB0 top-p 1.0. A text-relative safety ceiling prevents runaway generation when EOS is not sampled. Use `--seed` for repeatable sampling; the acceptance suite checks strict byte determinism.
 
 Useful validation commands:
 
@@ -358,7 +386,7 @@ Further reading:
 - [Architecture](docs/architecture.md)
 - [Current 0.6B baseline](docs/performance-baseline-0.6b-current.md)
 - [Optimization results](docs/optimization-results-0.6b.md)
-- [CUDA graph and GPU-resident vocoder evaluation](docs/cuda-graph-evaluation.md)
+- [Current 1.7B baseline and GPU-resident vocoder evaluation](docs/cuda-graph-evaluation.md)
 - [Historical baseline](docs/performance-baseline-0.6b.md)
 
 Use each CLI's `--help` output as the authoritative option reference.

@@ -1,7 +1,7 @@
 {
   "name": "qwen3-tts-0.6b-f16-current-main",
-  "measured_revision": "58661ee",
-  "date": "2026-07-24",
+  "measured_revision": "350ff5b",
+  "date": "2026-07-27",
   "platform": {
     "gpu": "NVIDIA GeForce RTX 5090 32 GB",
     "driver": "595.95",
@@ -18,53 +18,68 @@
   "streaming_profile": {
     "name": "offgrid-callback",
     "preroll_ms": 350,
-    "first_window_frames": 5,
-    "ramp_window_frames": 5,
+    "first_window_frames": 6,
+    "ramp_window_frames": 6,
     "ramp_window_count": 2,
-    "steady_window_frames": 8,
-    "adaptive_min_window_frames": 7,
-    "context_frames": 2,
+    "steady_window_frames": 10,
+    "adaptive_min_window_frames": null,
+    "context_frames": 4,
+    "early_context_frames": 2,
+    "final_context_frames": 8,
     "delivery_target_lead_ms": 520
   },
   "metrics": {
     "cold_initialization_ms": {
-      "mean": 1286,
-      "min": 1280,
-      "max": 1294
+      "mean": 1310,
+      "min": 1295,
+      "max": 1328
     },
-    "embedding_extraction_20_3s_ms": {
-      "mean": 249,
-      "min": 241,
-      "max": 260
+    "embedding_extraction_priestley_28_8s_ms": {
+      "mean": 347,
+      "min": 346,
+      "max": 349
     },
-    "embedding_extraction_priestley_48_2s_ms": 610,
-    "estimated_cold_clone_readiness_ms": 1540,
+    "cold_clone_readiness_priestley_28_8s_ms": {
+      "mean": 1673,
+      "min": 1656,
+      "max": 1683
+    },
     "estimated_cold_first_350ms_ms": {
-      "min": 1660,
-      "max": 1670
+      "min": 1578,
+      "max": 1630
     },
     "resident_first_350ms_ms": {
-      "min": 373,
-      "max": 381
+      "min": 283,
+      "max": 302
     },
     "max_callback_gap_ms": {
-      "min": 430,
-      "max": 441
+      "min": 239,
+      "max": 262
     },
     "minimum_playback_headroom_ms": {
-      "min": 20.9,
-      "max": 54.9
+      "min": 256.9,
+      "max": 312.9
     },
     "simulated_playback_underruns": 0,
     "callback_realtime_multiple": {
-      "min": 1.2,
-      "max": 1.25
+      "min": 2.61,
+      "max": 2.72
     },
     "callback_rtf": {
-      "min": 0.797,
-      "max": 0.835
+      "min": 0.368,
+      "max": 0.383
     },
-    "batch_realtime_multiple": 1.41,
+    "physical_vocoder_batch_size": 2,
+    "physical_vocoder_45_frame_speedup": {
+      "min": 1.24,
+      "max": 1.33
+    },
+    "physical_vocoder_9_frame_speedup": {
+      "min": 2.14,
+      "max": 2.21
+    },
+    "physical_vocoder_waveform_rmse_45_frames": 0.0025,
+    "physical_vocoder_max_sample_delta_45_frames": 0.122,
     "natural_eos_cases": 5,
     "safety_limit_cases": 1,
     "unbounded_or_absolute_limit_cases": 0,
@@ -80,6 +95,7 @@
     "multi-voice speaker similarity",
     "listening MOS",
     "p95 and p99 cadence",
-    "long-duration soak testing"
+    "long-duration soak testing",
+    "intermittent fixed-seed byte divergence"
   ]
 }

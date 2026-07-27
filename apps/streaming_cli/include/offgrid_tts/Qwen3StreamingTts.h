@@ -45,15 +45,14 @@ struct TtsStreamOptions {
     bool dump_streaming_overlap = false;
     bool play_streaming = true;
     int32_t live_preroll_ms = 150;
-    int32_t first_tail_window_frames = 3;
+    int32_t first_tail_window_frames = 6;
     int32_t ramp_tail_window_frames = 6;
-    int32_t ramp_tail_window_count = 0;
-    // 0 selects the model-tuned default: 7 frames for 0.6B, 12 for 1.7B.
-    int32_t steady_tail_window_frames = 0;
-    int32_t context_frames = 2;
-    int32_t early_context_frames = 1;
+    int32_t ramp_tail_window_count = 2;
+    int32_t steady_tail_window_frames = 10;
+    int32_t context_frames = 4;
+    int32_t early_context_frames = 2;
     int32_t early_context_window_count = 2;
-    int32_t final_context_frames = 3;
+    int32_t final_context_frames = 8;
     bool adaptive_steady_windows = false;
     int32_t adaptive_min_tail_window_frames = 6;
     int32_t adaptive_low_watermark_ms = 220;

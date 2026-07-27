@@ -1,5 +1,29 @@
 # CUDA graph evaluation
 
+## Current 1.7B F16 baseline
+
+Measured on 2026-07-27 at revision `350ff5b` on an RTX 5090 with the Base F16
+model, Priestley voice, seed 42, `offgrid-callback`, and a simulated 350 ms
+playback buffer:
+
+| Dimension | Current result |
+|---|---:|
+| Cold model/runtime start with stored clone | 1.932-1.978 s |
+| Encode current 28.8 s reference after model load | 348-355 ms |
+| Cold new-clone readiness | approximately 2.28-2.33 s |
+| Resident first 350 ms | 319-342 ms |
+| Cold first 350 ms with stored clone | approximately 2.25-2.32 s |
+| Standard-passage streaming speed | 2.48-2.53x realtime (RTF 0.395-0.404) |
+| Standard-passage maximum production gap | 251-295 ms |
+| Standard-passage minimum playback headroom | 301-310 ms |
+| Simulated playback underruns | 0/3 |
+
+The standard passage was `Use a reasonably long paragraph for this consistency
+test.` Five longer tuning runs with the smoother window policy measured RTF
+0.345-0.356, first-buffer readiness of 309-318 ms, and no simulated underruns.
+
+## Optimization history
+
 Measured on an RTX 5090 with the 1.7B Base F16 model, the Priestley embedding,
 seed 42, and the `offgrid-callback` streaming profile. Each result is the mean
 of four alternating runs of the same passage.
@@ -65,7 +89,7 @@ the reported `faster-qwen3-tts` result of approximately 0.8 RTF. It is not a
 same-GPU comparison: the external report used a GTX 1660 Super, while these
 measurements use an RTX 5090.
 
-The quick acceptance suite also passed fixed-seed byte determinism, callback/WAV
-parity, cancellation, cadence, fidelity heuristics, and reliability. RTX 4090
-code generation is included (`sm_89`) but still requires measurement on actual
-4090 hardware.
+The quick acceptance suite also passed callback/WAV parity, cancellation,
+cadence, fidelity heuristics, and reliability. The portable CUDA build now
+contains native GTX 16-series (`sm_75`), RTX 4090 (`sm_89`), and RTX 5090
+(`sm_120a`) code. Only the RTX 5090 has been performance-tested locally.

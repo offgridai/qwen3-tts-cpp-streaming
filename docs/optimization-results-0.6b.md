@@ -1,8 +1,11 @@
 # Qwen3-TTS 0.6B optimization results
 
-These results explain the experiments that moved the original 2026-07-24 RTX 5090 baseline to the accepted state in `performance-baseline-0.6b-current.md`. The original baseline remains in `performance-baseline-0.6b.md`.
+These results record the first optimization phase through revision `58661ee` on
+2026-07-24. The later GPU-resident vocoder work supersedes its performance
+figures; see `performance-baseline-0.6b-current.md` for the current baseline.
+The original pre-optimization baseline remains in `performance-baseline-0.6b.md`.
 
-## Accepted results
+## Results at revision 58661ee
 
 | Dimension | Baseline | Optimized | Change |
 |---|---:|---:|---:|
@@ -18,7 +21,12 @@ The clone speedup replaces the speaker frontend's per-frame O(N²) DFT with a ra
 
 Initialization now primes the transformer and first vocoder path but skips the 392 ms steady-window vocoder pass. Set `QWEN3_TTS_PRIME_RUNTIME=full` to restore full eager priming or `0` to disable priming. The default trades approximately 9 ms of resident first-buffer latency for a substantially faster cold path.
 
-The final `offgrid-callback` profile uses a 5-frame first window, two 5-frame ramp windows, 2-frame context, and adaptive 7-8-frame steady windows. The benchmark models a 350 ms downstream buffer and permits 520 ms of lead afterward. Short and long seeded probes reported zero simulated underruns, 21-54 ms minimum headroom, and 1.21-1.25x real-time throughput.
+At that revision, the `offgrid-callback` profile used a 5-frame first window,
+two 5-frame ramp windows, 2-frame context, and adaptive 7-8-frame steady
+windows. Its short and long seeded probes reported zero simulated underruns,
+21-54 ms minimum headroom, and 1.21-1.25x realtime throughput. The current
+resident-vocoder implementation retains the profile while substantially
+improving its decode time and playback headroom.
 
 ## Rejected low-preroll cadence pass
 

@@ -1,6 +1,6 @@
 # Qwen3-TTS 0.6B current performance baseline
 
-This is the accepted local baseline for `main` at revision `58661ee` on 2026-07-24. Results are hardware- and passage-specific measurements, not portable model claims. The original pre-optimization baseline is retained in `performance-baseline-0.6b.md`.
+This is the accepted local baseline for `main` at revision `350ff5b` on 2026-07-27. Results are hardware- and passage-specific measurements, not portable model claims. The original pre-optimization baseline is retained in `performance-baseline-0.6b.md`.
 
 `performance-baseline-0.6b-current.json` contains the same acceptance-critical values in machine-readable form.
 
@@ -18,7 +18,10 @@ This is the accepted local baseline for `main` at revision `58661ee` on 2026-07-
 | Sampling | temperature 0.75, top-k 16, residual top-p 0.9, repetition penalty 1.02, CB0 top-p 1.0 |
 | Streaming profile | `offgrid-callback` |
 
-`offgrid-callback` starts with five frames, uses two five-frame ramp windows, then adaptive seven- to eight-frame windows with two frames of left context. The benchmark evaluates a downstream 350 ms callback buffer and permits up to 520 ms of lead after startup.
+`offgrid-callback` starts with six frames, uses two six-frame ramp windows, then
+fixed ten-frame windows with four frames of left context. Early windows use
+two context frames and the final window uses eight. The benchmark evaluates a
+downstream 350 ms callback buffer and permits up to 520 ms of lead after startup.
 
 The distributable CUDA build contains native GTX 16-series (`sm_75`), RTX 4090
 (`sm_89`), and RTX 5090 (`sm_120a`) kernels. All figures below remain RTX 5090
@@ -29,19 +32,28 @@ claims until the acceptance suite has run on that hardware.
 
 | Dimension | Current baseline | Notes |
 |---|---:|---|
-| Cold model/runtime initialization | 1.286 s mean, 1.280-1.294 s | Tokenizer, transformer, vocoder, and short runtime prime. |
-| Extract embedding from 20.3 s reference | 249 ms mean, 241-260 ms | Model already loaded; 55x faster than the original frontend. |
-| Extract Priestley embedding from 48.2 s reference | 610 ms | Produces 1,024 finite values. |
-| Cold clone readiness, 20.3 s reference | approximately 1.54 s | Initialization plus extraction. |
-| Cold first 350 ms with stored embedding | approximately 1.66-1.67 s | Initialization plus resident callback startup. |
-| Resident first 350 ms callback buffer | 373-381 ms | Configured preroll is 350 ms; compute determines actual readiness. |
-| Maximum callback/decode gap | 430-441 ms | Short and long seeded probes. |
-| Minimum simulated playback headroom | 21-55 ms | Measured after playback starts. |
-| Simulated playback underruns | 0 | Short and long seeded probes. |
-| Callback streaming speed | 1.20-1.25x real time | RTF 0.797-0.835. |
-| Batch synthesis speed | approximately 1.41x real time | Priestley evaluation passage. |
+| Cold model/runtime initialization | 1.310 s mean, 1.295-1.328 s | Tokenizer, transformer, resident vocoder, and short runtime prime. |
+| Extract embedding from current 28.8 s Priestley reference | 347 ms mean, 346-349 ms | Model already loaded; produces 1,024 finite values. |
+| Cold clone readiness, current reference | approximately 1.66-1.68 s | Measured model initialization plus extraction. |
+| Cold first 350 ms with stored embedding | approximately 1.58-1.63 s | Initialization plus resident callback startup. |
+| Resident first 350 ms callback buffer | 283-302 ms | Remains below the 350 ms perceptual ceiling. |
+| Maximum callback/decode gap | 239-262 ms | Larger, less frequent quality-oriented windows. |
+| Minimum simulated playback headroom | 257-313 ms | Measured after playback starts. |
+| Simulated playback underruns | 0/3 | Three standard-passage runs. |
+| Callback streaming speed | 2.61-2.72x real time | RTF 0.368-0.383. |
 
-Steady seven-frame windows produce about 560 ms of new PCM in roughly 420-441 ms. The larger post-start lead is intentional: it does not increase the benchmark's initial 350 ms downstream buffer target, but it absorbs bursty vocoder completion.
+The principal gain comes from keeping vocoder weights resident on CUDA instead
+of copying them through the scheduler for every decode graph. The decoder uses
+eager CUDA execution and the legacy scratch allocator; transformer CUDA graphs
+and VMM remain enabled. Steady callback chunks are produced faster than
+playback consumes them, increasing headroom without increasing the configured
+350 ms downstream buffer target.
+
+The smoother default uses that headroom for six-frame startup/ramp windows,
+ten-frame steady windows, and four-frame overlap context. Compared with the
+short-window policy, it reduces vocoder join frequency and gives each join more
+acoustic history. Automated spectral heuristics were neutral, so the expected
+quality benefit must be confirmed by listening.
 
 ## Fidelity and reliability
 
@@ -57,7 +69,13 @@ The six-seed passage that reproduced the original termination defect now records
 
 Lower spectral scores are better, but these detectors are uncalibrated heuristics. They did not reliably predict every audible streaming seam during optimization. Human A/B listening is therefore a required acceptance check.
 
-Seeded synthesis is byte-deterministic. Semantic CB0 and residual-codebook sampling use separate seeded random streams. CB0 top-p remains 1.0 because lower values prevented natural EOS for some seeds. A dynamic ceiling of five audio frames per content token, with a 64-frame minimum, prevents runaway generation when EOS is not sampled.
+Semantic CB0 and residual-codebook sampling use separate seeded random streams.
+The acceptance suite enforces fixed-seed byte determinism, although intermittent
+byte-level divergence was observed during repeated 2026-07-27 wrapper probes
+and remains an open reliability item. CB0 top-p remains 1.0 because lower values
+prevented natural EOS for some seeds. A dynamic ceiling of five audio frames per
+content token, with a 64-frame minimum, prevents runaway generation when EOS is
+not sampled.
 
 The optimized FFT speaker frontend reproduced the prior embedding with cosine similarity 0.999999996, maximum absolute difference 0.000089, and RMSE 0.000028.
 
